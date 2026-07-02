@@ -1,5 +1,5 @@
-import React from 'react';
-import { Form, Input, Button, Card, Typography } from 'antd';
+import React, { useState } from 'react';
+import { Form, Input, Button, Card, Typography, Alert } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -80,8 +80,10 @@ export default function LoginPage() {
   const [form] = Form.useForm();
   const navigate = useNavigate();
   const { login } = useAuth();
+  const [errorMsg, setErrorMsg] = useState('');
 
   const handleLogin = async (values) => {
+    setErrorMsg('');
     try {
       await login(values.employeeId, values.password);
       const token = localStorage.getItem('access_token');
@@ -101,7 +103,7 @@ export default function LoginPage() {
         navigate('/login');
       }
     } catch (error) {
-      alert(error.message);
+      setErrorMsg(error.message);
     }
   };
 
@@ -150,6 +152,11 @@ export default function LoginPage() {
               />
             </Form.Item>
 
+            {errorMsg && (
+              <Form.Item style={{ marginBottom: '12px' }}>
+                <Alert message={errorMsg} type="error" showIcon />
+              </Form.Item>
+            )}
             <Form.Item style={{ marginBottom: '8px' }}>
               <Button type="primary" htmlType="submit" size="large" style={styles.loginBtn}>
                 Sign In

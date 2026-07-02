@@ -1,6 +1,64 @@
 from rest_framework import serializers
-from .models import TblEmployee, TblEmployeeRole, TblRole
+from .models import TblEmployee, TblEmployeeRole, TblRole, TblFacility, TblWorkCenter, TblResource, TblEquipment, TblReasonCode, TblReasonType, TblProduct, TblShiftDefinition
 import re
+
+class ShiftSerializer(serializers.ModelSerializer):
+    duration = serializers.SerializerMethodField()
+    break_time = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TblShiftDefinition
+        fields = ['id', 'shift_name', 'duration', 'break_time']
+
+    def get_duration(self, obj):
+        parts = (obj.shift_sched or '').split('|')
+        return parts[0] if parts else ''
+
+    def get_break_time(self, obj):
+        parts = (obj.shift_sched or '').split('|')
+        return parts[1] if len(parts) > 1 else ''
+
+class ProductSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TblProduct
+        fields = ['id', 'product_no', 'description', 'traceability']
+
+class ReasonTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TblReasonType
+        fields = ['id', 'reason_type', 'reason_category']
+
+class ReasonCodeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TblReasonCode
+        fields = ['reason_code', 'description', 'category', 'reason_type_text']
+
+class PlantSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TblFacility
+        fields = ['facility']
+
+class WorkCenterSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TblWorkCenter
+        fields = ['work_center', 'facility']
+
+class WorkstationSerializer(serializers.ModelSerializer):
+    facility_name = serializers.CharField(source='facility.facility', read_only=True)
+    work_center_name = serializers.CharField(source='work_center.work_center', read_only=True)
+
+    class Meta:
+        model = TblResource
+        fields = ['id', 'resource_name', 'work_center_name', 'facility_name']
+
+class MachineSerializer(serializers.ModelSerializer):
+    workstation_name = serializers.CharField(source='resource.resource_name', read_only=True)
+    work_center_name = serializers.CharField(source='resource.work_center.work_center', read_only=True)
+    facility_name = serializers.CharField(source='resource.facility.facility', read_only=True)
+
+    class Meta:
+        model = TblEquipment
+        fields = ['id', 'equipment', 'workstation_name', 'work_center_name', 'facility_name']
 
 class LoginSerializer(serializers.Serializer):
     employee_no = serializers.CharField()

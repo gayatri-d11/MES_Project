@@ -116,6 +116,8 @@ class TblShiftDefinition(AuditBaseModel):
 class TblProduct(AuditBaseModel):
     id = models.IntegerField(primary_key=True)
     product_no = models.CharField(max_length=80)
+    description = models.CharField(max_length=100, null=True, blank=True)
+    traceability = models.CharField(max_length=50, null=True, blank=True)
     text_id = models.IntegerField(null=True, blank=True)
     unit_id = models.IntegerField(null=True, blank=True)
     lot_tracking_code = models.SmallIntegerField()
@@ -158,6 +160,9 @@ class TblResourceType(AuditBaseModel):
 # ==========================================
 class TblReasonCode(AuditBaseModel):
     reason_code = models.CharField(max_length=20, primary_key=True)
+    description = models.CharField(max_length=100, null=True, blank=True)
+    category = models.CharField(max_length=40, null=True, blank=True)
+    reason_type_text = models.CharField(max_length=40, null=True, blank=True)
     text_id = models.IntegerField(null=True, blank=True)
     reason_type = models.ForeignKey(TblReasonType, on_delete=models.RESTRICT, db_column='reason_type_id', null=True, blank=True)
 

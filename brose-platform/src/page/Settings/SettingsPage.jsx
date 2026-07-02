@@ -117,23 +117,24 @@ const handleEditOpen = (record) => {
     setEditModalOpen(true);
   };
 
-const handleDelete = (record) => {
+const handleToggleStatus = (record) => {
+  const isActive = record.is_active;
   modal.confirm({
-    title: 'Are you sure you want to delete this employee?',
+    title: isActive ? 'Deactivate this employee?' : 'Activate this employee?',
     content: `${record.employee_no} — ${record.last_name}`,
-    okText: 'Yes',
-    okType: 'danger',
+    okText: isActive ? 'Deactivate' : 'Activate',
+    okType: isActive ? 'danger' : 'primary',
     cancelText: 'Cancel',
     onOk: async () => {
       const response = await fetch(`http://localhost:8000/api/employees/${record.id}/`, {
-        method: 'DELETE',
+        method: isActive ? 'DELETE' : 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
       });
       if (response.ok) {
         fetchEmployees();
-        modal.success({ title: 'Employee deleted successfully' });
+        modal.success({ title: isActive ? 'Employee deactivated successfully' : 'Employee activated successfully' });
       } else {
-        modal.error({ title: 'Error', content: 'Failed to delete employee' });
+        modal.error({ title: 'Error', content: 'Failed to update employee status' });
       }
     },
   });
@@ -166,7 +167,7 @@ const handleDelete = (record) => {
   const employeeColumns = [
     { title: 'Employee ID', dataIndex: 'employee_no', key: 'employee_no' },
     { title: 'Name', dataIndex: 'last_name', key: 'last_name' },
-        {
+    {
       title: 'Role', dataIndex: 'role', key: 'role',
       render: (roleList) => (
         <>
@@ -178,20 +179,28 @@ const handleDelete = (record) => {
         </>
       ),
     },
-
+    {
+      title: 'Status', dataIndex: 'is_active', key: 'is_active',
+      render: (isActive) => (
+        <Tag color={isActive ? 'success' : 'default'}>{isActive ? 'Active' : 'Inactive'}</Tag>
+      ),
+    },
     {
       title: 'Action', key: 'action',
       render: (_, record) => (
-  <div style={{ display: 'flex', gap: '12px' }}>
-    <Button type="link" style={{ color: colors.primary, padding: 0 }} onClick={() => handleEditOpen(record)}>
-      Edit
-    </Button>
-    <Button type="link" danger style={{ padding: 0 }} onClick={() => handleDelete(record)}>
-      Delete
-    </Button>
-  </div>
-),
-
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <Button type="link" style={{ color: colors.primary, padding: 0 }} onClick={() => handleEditOpen(record)}>
+            Edit
+          </Button>
+          <Button
+            type="link"
+            style={{ padding: 0, color: record.is_active ? '#ff4d4f' : '#52c41a' }}
+            onClick={() => handleToggleStatus(record)}
+          >
+            {record.is_active ? 'Deactivate' : 'Activate'}
+          </Button>
+        </div>
+      ),
     },
   ];
 
@@ -382,7 +391,7 @@ const handleDelete = (record) => {
             />
             <Select
               mode="multiple"
-              placeholder="Select Page(s)"
+              placeholder="Select Access Scope"
               value={newRole.pages}
               onChange={(val) => setNewRole({ ...newRole, pages: val })}
               style={{ width: '260px' }}

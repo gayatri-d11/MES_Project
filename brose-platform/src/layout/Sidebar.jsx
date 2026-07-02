@@ -62,9 +62,9 @@ export default function Sidebar() {
   const navigate = useNavigate();
   const {user} = useAuth();
 
-  const menuItems = allMenuItems.filter(item =>
-    user?.pages?.includes(item.pageKey)
-  );
+  const menuItems = allMenuItems
+    .filter(item => user?.pages?.includes(item.pageKey))
+    .map(({ pageKey, ...rest }) => rest);
 
 
 
