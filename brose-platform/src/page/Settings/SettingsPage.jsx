@@ -287,7 +287,7 @@ const handleToggleStatus = (record) => {
   const roleColumns = [
     { title: 'Role Name', dataIndex: 'role_name', key: 'role_name' },
     {
-      title: 'Pages', dataIndex: 'pages', key: 'pages',
+      title: 'Access Scope', dataIndex: 'pages', key: 'pages',
       render: (pages) => (pages || []).map(p => (
         <Tag key={p}>{PAGE_OPTIONS.find(o => o.value === p)?.label || p}</Tag>
       )),
@@ -368,7 +368,7 @@ const handleToggleStatus = (record) => {
               emp.last_name.toLowerCase().includes(searchText.toLowerCase())
             )}
             rowKey="id"
-            pagination={false}
+            pagination={{ pageSize: 10, showTotal: (total) => `Total ${total} items` }}
             size="small"
           />
         </div>
@@ -403,7 +403,7 @@ const handleToggleStatus = (record) => {
             columns={roleColumns}
             dataSource={roles}
             rowKey="id"
-            pagination={false}
+            pagination={{ pageSize: 10, showTotal: (total) => `Total ${total} items` }}
             size="small"
           />
         </div>

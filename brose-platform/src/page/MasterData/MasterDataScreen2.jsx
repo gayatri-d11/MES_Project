@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Button, Table, Select, Input, App, TimePicker } from 'antd';
+import { Card, Button, Table, Select, Input, App, TimePicker, Switch } from 'antd';
 import { PlusOutlined, SaveOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import colors from '../../theme/colors';
@@ -43,9 +43,12 @@ export default function MasterDataScreen2() {
   const authHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
 
   const [products, setProducts] = useState([]);
+  const [showInactive, setShowInactive] = useState(false);
   const [workCenters, setWorkCenters] = useState([]);
   const [shifts, setShifts] = useState([]);
+  const [showInactiveShifts, setShowInactiveShifts] = useState(false);
   const [shiftPlanning, setShiftPlanning] = useState([]);
+  const [showInactivePlanning, setShowInactivePlanning] = useState(false);
   const [newVariant, setNewVariant] = useState({ materialNumber: '', description: '', traceability: [] });
   const [newShift, setNewShift] = useState({ shiftName: '', shiftStart: null, shiftEnd: null, breakStart: null, breakEnd: null });
   const [newPlanning, setNewPlanning] = useState({ shift: '', workCentre: '', active: '' });
@@ -53,15 +56,22 @@ export default function MasterDataScreen2() {
   const h = { headers: { 'Authorization': `Bearer ${token}` } };
 
   const fetchProducts = () => {
-    fetch(`${API}/products/`, h).then(r => r.json()).then(d => setProducts(Array.isArray(d) ? d : []));
+    const url = showInactive ? `${API}/products/?all=true` : `${API}/products/`;
+    fetch(url, h).then(r => r.json()).then(d => setProducts(Array.isArray(d) ? d : []));
     fetch(`${API}/work-centers/`, h).then(r => r.json()).then(d => setWorkCenters(Array.isArray(d) ? d : []));
   };
 
   const fetchShifts = () => {
-    fetch(`${API}/shifts/`, h).then(r => r.json()).then(d => setShifts(Array.isArray(d) ? d : []));
+    const url = showInactiveShifts ? `${API}/shifts/?all=true` : `${API}/shifts/`;
+    fetch(url, h).then(r => r.json()).then(d => setShifts(Array.isArray(d) ? d : []));
   };
 
-  useEffect(() => { fetchProducts(); fetchShifts(); }, []);
+  const fetchShiftPlanning = () => {
+    const url = showInactivePlanning ? `${API}/shift-planning/?all=true` : `${API}/shift-planning/`;
+    fetch(url, h).then(r => r.json()).then(d => setShiftPlanning(Array.isArray(d) ? d : []));
+  };
+
+  useEffect(() => { fetchProducts(); fetchShifts(); fetchShiftPlanning(); }, [showInactive, showInactiveShifts, showInactivePlanning]);
 
   const handleAddVariant = async () => {
     if (!newVariant.materialNumber.trim()) { modal.error({ title: 'Error', content: 'Material Number is required.' }); return; }
@@ -78,16 +88,18 @@ export default function MasterDataScreen2() {
     else modal.error({ title: 'Error', content: data.error || 'Something went wrong.' });
   };
 
-  const handleDeleteVariant = (id, product_no) => {
+  const handleToggleVariant = (id, product_no, is_active) => {
     modal.confirm({
-      title: 'Confirm Delete',
-      content: `Delete product "${product_no}"?`,
-      okText: 'Delete', okType: 'danger', cancelText: 'Cancel',
+      title: is_active ? 'Deactivate this variant?' : 'Activate this variant?',
+      content: `"${product_no}" will be ${is_active ? 'deactivated' : 'activated'}.`,
+      okText: is_active ? 'Deactivate' : 'Activate',
+      okType: is_active ? 'danger' : 'primary',
+      cancelText: 'Cancel',
       onOk: async () => {
-        const res = await fetch(`${API}/products/`, { method: 'DELETE', headers: authHeaders, body: JSON.stringify({ id }) });
+        const res = await fetch(`${API}/products/`, { method: 'PATCH', headers: authHeaders, body: JSON.stringify({ id }) });
         const data = await res.json();
         if (res.ok) { fetchProducts(); modal.success({ title: data.message }); }
-        else modal.error({ title: 'Cannot Delete', content: data.error || 'Something went wrong.' });
+        else modal.error({ title: 'Error', content: data.error || 'Something went wrong.' });
       },
     });
   };
@@ -99,7 +111,13 @@ export default function MasterDataScreen2() {
     {
       title: 'Action', key: 'action',
       render: (_, r) => (
-        <Button type="link" danger style={{ padding: 0 }} onClick={() => handleDeleteVariant(r.id, r.product_no)}>Delete</Button>
+        <Button
+          type="link"
+          style={{ padding: 0, color: r.is_active ? '#ff4d4f' : '#52c41a' }}
+          onClick={() => handleToggleVariant(r.id, r.product_no, r.is_active)}
+        >
+          {r.is_active ? 'Deactivate' : 'Activate'}
+        </Button>
       ),
     },
   ];
@@ -126,16 +144,19 @@ export default function MasterDataScreen2() {
     else modal.error({ title: 'Error', content: data.error || 'Something went wrong.' });
   };
 
-  const handleDeleteShift = (id, shift_name) => {
+  const handleToggleShift = (id, shift_name, is_active) => {
     modal.confirm({
-      title: 'Confirm Delete',
-      content: `Delete shift "${shift_name}"?`,
-      okText: 'Delete', okType: 'danger', cancelText: 'Cancel',
+      title: is_active ? 'Deactivate this shift?' : 'Activate this shift?',
+      content: `"${shift_name}" will be ${is_active ? 'deactivated' : 'activated'}.`,
+      okText: is_active ? 'Deactivate' : 'Activate',
+      okType: is_active ? 'danger' : 'primary',
+      cancelText: 'Cancel',
       onOk: async () => {
-        const res = await fetch(`${API}/shifts/`, { method: 'DELETE', headers: authHeaders, body: JSON.stringify({ id }) });
+        const method = is_active ? 'DELETE' : 'PATCH';
+        const res = await fetch(`${API}/shifts/`, { method, headers: authHeaders, body: JSON.stringify({ id }) });
         const data = await res.json();
         if (res.ok) { fetchShifts(); modal.success({ title: data.message }); }
-        else modal.error({ title: 'Cannot Delete', content: data.error || 'Something went wrong.' });
+        else modal.error({ title: 'Error', content: data.error || 'Something went wrong.' });
       },
     });
   };
@@ -147,21 +168,65 @@ export default function MasterDataScreen2() {
     {
       title: 'Action', key: 'action',
       render: (_, r) => (
-        <Button type="link" danger style={{ padding: 0 }} onClick={() => handleDeleteShift(r.id, r.shift_name)}>Delete</Button>
+        <Button
+          type="link"
+          style={{ padding: 0, color: r.is_active ? '#ff4d4f' : '#52c41a' }}
+          onClick={() => handleToggleShift(r.id, r.shift_name, r.is_active)}
+        >
+          {r.is_active ? 'Deactivate' : 'Activate'}
+        </Button>
       ),
     },
   ];
 
   const planningColumns = [
-    { title: 'Shift', dataIndex: 'shift', key: 'shift' },
-    { title: 'Work Centre', dataIndex: 'workCentre', key: 'workCentre' },
-    { title: 'Active', dataIndex: 'active', key: 'active' },
+    { title: 'Shift', dataIndex: 'shift_name', key: 'shift_name' },
+    { title: 'Work Centre', dataIndex: 'work_center_name', key: 'work_center_name' },
+    {
+      title: 'Active', dataIndex: 'active', key: 'active',
+      render: (val) => val ? 'Yes' : 'No',
+    },
+    {
+      title: 'Action', key: 'action',
+      render: (_, r) => (
+        <Button
+          type="link"
+          style={{ padding: 0, color: r.is_active ? '#ff4d4f' : '#52c41a' }}
+          onClick={() => handleTogglePlanning(r.id, r.shift_name, r.work_center_name, r.is_active)}
+        >
+          {r.is_active ? 'Deactivate' : 'Activate'}
+        </Button>
+      ),
+    },
   ];
 
-  const handleAddPlanning = () => {
-    if (!newPlanning.shift || !newPlanning.workCentre || !newPlanning.active) return;
-    setShiftPlanning([...shiftPlanning, { ...newPlanning, key: Date.now().toString() }]);
-    setNewPlanning({ shift: '', workCentre: '', active: '' });
+  const handleAddPlanning = async () => {
+    if (!newPlanning.shift || !newPlanning.workCentre || !newPlanning.active) {
+      modal.error({ title: 'Error', content: 'Please fill in all fields.' }); return;
+    }
+    const res = await fetch(`${API}/shift-planning/`, {
+      method: 'POST', headers: authHeaders,
+      body: JSON.stringify({ shift: newPlanning.shift, work_center: newPlanning.workCentre, active: newPlanning.active }),
+    });
+    const data = await res.json();
+    if (res.ok) { fetchShiftPlanning(); setNewPlanning({ shift: '', workCentre: '', active: '' }); modal.success({ title: data.message }); }
+    else modal.error({ title: 'Error', content: data.error || 'Something went wrong.' });
+  };
+
+  const handleTogglePlanning = (id, shift_name, work_center_name, is_active) => {
+    modal.confirm({
+      title: is_active ? 'Deactivate this shift planning?' : 'Activate this shift planning?',
+      content: `"${shift_name} — ${work_center_name}" will be ${is_active ? 'deactivated' : 'activated'}.`,
+      okText: is_active ? 'Deactivate' : 'Activate',
+      okType: is_active ? 'danger' : 'primary',
+      cancelText: 'Cancel',
+      onOk: async () => {
+        const res = await fetch(`${API}/shift-planning/`, { method: 'DELETE', headers: authHeaders, body: JSON.stringify({ id }) });
+        const data = await res.json();
+        if (res.ok) { fetchShiftPlanning(); modal.success({ title: data.message }); }
+        else modal.error({ title: 'Error', content: data.error || 'Something went wrong.' });
+      },
+    });
   };
 
   return (
@@ -183,7 +248,14 @@ export default function MasterDataScreen2() {
           </Select>
           <Button icon={<PlusOutlined />} onClick={handleAddVariant}>ADD</Button>
         </div>
-        <Table columns={variantColumns} dataSource={products} rowKey="id" pagination={false} size="small" />
+        <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Switch size="small" checked={showInactive} onChange={setShowInactive} />
+          <span style={{ fontSize: '13px', color: colors.textPrimary }}>Show Deactivated</span>
+        </div>
+        <style>{`.row-inactive td { opacity: 0.45; }`}</style>
+        <Table columns={variantColumns} dataSource={products} rowKey="id" pagination={{ pageSize: 10, showTotal: (total) => `Total ${total} items` }} size="small"
+          rowClassName={(r) => !r.is_active ? 'row-inactive' : ''}
+        />
       </Card>
 
       {/* Section 2 — Shift Definition */}
@@ -234,7 +306,14 @@ export default function MasterDataScreen2() {
           />
           <Button icon={<PlusOutlined />} onClick={handleAddShift}>ADD</Button>
         </div>
-        <Table columns={shiftColumns} dataSource={shifts} rowKey="id" pagination={false} size="small" />
+        <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Switch size="small" checked={showInactiveShifts} onChange={setShowInactiveShifts} />
+          <span style={{ fontSize: '13px', color: colors.textPrimary }}>Show Deactivated</span>
+        </div>
+        <style>{`.row-inactive-shift td { opacity: 0.45; }`}</style>
+        <Table columns={shiftColumns} dataSource={shifts} rowKey="id" pagination={{ pageSize: 10, showTotal: (total) => `Total ${total} items` }} size="small"
+          rowClassName={(r) => !r.is_active ? 'row-inactive-shift' : ''}
+        />
       </Card>
 
       {/* Section 3 — Shift Planning */}
@@ -256,7 +335,15 @@ export default function MasterDataScreen2() {
           </Select>
           <Button icon={<PlusOutlined />} onClick={handleAddPlanning}>ADD</Button>
         </div>
-        <Table columns={planningColumns} dataSource={shiftPlanning} pagination={false} size="small" />
+        <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Switch size="small" checked={showInactivePlanning} onChange={setShowInactivePlanning} />
+          <span style={{ fontSize: '13px', color: colors.textPrimary }}>Show Deactivated</span>
+        </div>
+        <style>{`.row-inactive-planning td { opacity: 0.45; }`}</style>
+        <Table columns={planningColumns} dataSource={shiftPlanning} rowKey="id"
+          pagination={{ pageSize: 10, showTotal: (total) => `Total ${total} items` }} size="small"
+          rowClassName={(r) => !r.is_active ? 'row-inactive-planning' : ''}
+        />
       </Card>
 
     </div>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Button, Table, Input, Select, App, Modal, Tabs } from 'antd';
+import { Card, Button, Table, Input, Select, App, Modal, Tabs, Switch } from 'antd';
 import { PlusOutlined, SaveOutlined, SettingOutlined } from '@ant-design/icons';
 import colors from '../../theme/colors';
 import constants from '../../theme/constants';
@@ -44,6 +44,7 @@ export default function MasterDataScreen1() {
   const [workCenters, setWorkCenters] = useState([]);
   const [workstations, setWorkstations] = useState([]);
   const [machineLayout, setMachineLayout] = useState([]);
+  const [showInactiveMachines, setShowInactiveMachines] = useState(false);
   const [reasonCodes, setReasonCodes] = useState([]);
   const [reasonTypes, setReasonTypes] = useState([]);
 
@@ -60,12 +61,14 @@ export default function MasterDataScreen1() {
     fetch(`${API}/plants/`, h).then(r => r.json()).then(d => setPlants(Array.isArray(d) ? d : []));
     fetch(`${API}/work-centers/`, h).then(r => r.json()).then(d => setWorkCenters(Array.isArray(d) ? d : []));
     fetch(`${API}/workstations/`, h).then(r => r.json()).then(d => setWorkstations(Array.isArray(d) ? d : []));
-    fetch(`${API}/machines/`, h).then(r => r.json()).then(d => {
+    const machineUrl = showInactiveMachines ? `${API}/machines/?all=true` : `${API}/machines/`;
+    fetch(machineUrl, h).then(r => r.json()).then(d => {
       if (Array.isArray(d)) {
         setMachineLayout(d.map(m => ({
           key: String(m.id), id: m.id,
           plant: m.facility_name, workCentre: m.work_center_name,
           workStation: m.workstation_name, module: m.equipment,
+          is_active: m.is_active,
         })));
       }
     });
@@ -73,7 +76,7 @@ export default function MasterDataScreen1() {
     fetch(`${API}/reason-types/`, h).then(r => r.json()).then(d => setReasonTypes(Array.isArray(d) ? d : []));
   };
 
-  useEffect(() => { fetchAll(); }, []);
+  useEffect(() => { fetchAll(); }, [showInactiveMachines]);
 
   const filteredWCs = workCenters.filter(w => w.facility === newMachine.plant);
   const filteredWSs = workstations.filter(w => w.work_center_name === newMachine.workCentre);
@@ -84,18 +87,19 @@ export default function MasterDataScreen1() {
     return true;
   };
 
-  const handleDelete = (url, body, confirmMsg) => {
+  const handleToggleMachine = (id, name, is_active) => {
     modal.confirm({
-      title: 'Confirm Delete',
-      content: confirmMsg,
-      okText: 'Delete',
-      okType: 'danger',
+      title: is_active ? 'Deactivate this machine?' : 'Activate this machine?',
+      content: `"${name}" will be ${is_active ? 'deactivated' : 'activated'}.`,
+      okText: is_active ? 'Deactivate' : 'Activate',
+      okType: is_active ? 'danger' : 'primary',
       cancelText: 'Cancel',
       onOk: async () => {
-        const res = await fetch(`${API}${url}`, { method: 'DELETE', headers: authHeaders, body: JSON.stringify(body) });
+        const method = is_active ? 'DELETE' : 'PATCH';
+        const res = await fetch(`${API}/machines/`, { method, headers: authHeaders, body: JSON.stringify({ id }) });
         const data = await res.json();
         if (res.ok) { fetchAll(); modal.success({ title: data.message }); }
-        else modal.error({ title: 'Cannot Delete', content: data.error || 'Something went wrong.' });
+        else modal.error({ title: 'Error', content: data.error || 'Something went wrong.' });
       },
     });
   };
@@ -174,9 +178,12 @@ export default function MasterDataScreen1() {
     {
       title: 'Action', key: 'action',
       render: (_, r) => (
-        <Button type="link" danger style={{ padding: 0 }}
-          onClick={() => handleDelete('/machines/', { id: r.id }, `Delete machine "${r.module}"?`)}>
-          Delete
+        <Button
+          type="link"
+          style={{ padding: 0, color: r.is_active ? '#ff4d4f' : '#52c41a' }}
+          onClick={() => handleToggleMachine(r.id, r.module, r.is_active)}
+        >
+          {r.is_active ? 'Deactivate' : 'Activate'}
         </Button>
       ),
     },
@@ -251,7 +258,14 @@ export default function MasterDataScreen1() {
           />
           <Button icon={<PlusOutlined />} onClick={handleAddMachine}>ADD</Button>
         </div>
-        <Table columns={machineColumns} dataSource={machineLayout} pagination={false} size="small" />
+        <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Switch size="small" checked={showInactiveMachines} onChange={setShowInactiveMachines} />
+          <span style={{ fontSize: '13px', color: colors.textPrimary }}>Show Deactivated</span>
+        </div>
+        <style>{`.row-inactive-machine td { opacity: 0.45; }`}</style>
+        <Table columns={machineColumns} dataSource={machineLayout} pagination={{ pageSize: 10, showTotal: (total) => `Total ${total} items` }} size="small"
+          rowClassName={(r) => !r.is_active ? 'row-inactive-machine' : ''}
+        />
       </Card>
 
       {/* Section 2 — Reason Code Definition */}
@@ -266,7 +280,7 @@ export default function MasterDataScreen1() {
           <Input placeholder="Reason Type" value={newReason.reasonType} onChange={e => setNewReason({ ...newReason, reasonType: e.target.value })} style={{ width: '200px' }} />
           <Button icon={<PlusOutlined />} onClick={handleAddReason}>ADD</Button>
         </div>
-        <Table columns={reasonColumns} dataSource={reasonCodes} rowKey="reason_code" pagination={false} size="small" />
+        <Table columns={reasonColumns} dataSource={reasonCodes} rowKey="reason_code" pagination={{ pageSize: 10, showTotal: (total) => `Total ${total} items` }} size="small" />
       </Card>
 
       {/* Hierarchy Management Modal */}
@@ -287,7 +301,7 @@ export default function MasterDataScreen1() {
                   <Input placeholder="Plant Name" value={newPlant} onChange={e => setNewPlant(e.target.value)} style={{ width: '200px' }} />
                   <Button icon={<PlusOutlined />} onClick={handleAddPlant}>ADD</Button>
                 </div>
-                <Table size="small" pagination={false} dataSource={plants} rowKey="facility" columns={plantColumns} />
+                <Table size="small" pagination={{ pageSize: 5 }} dataSource={plants} rowKey="facility" columns={plantColumns} />
               </div>
             ),
           },
@@ -307,7 +321,7 @@ export default function MasterDataScreen1() {
                   <Input placeholder="Work Center Name" value={newWC.work_center} onChange={e => setNewWC({ ...newWC, work_center: e.target.value })} style={{ width: '180px' }} />
                   <Button icon={<PlusOutlined />} onClick={handleAddWC}>ADD</Button>
                 </div>
-                <Table size="small" pagination={false} dataSource={workCenters} rowKey="work_center" columns={wcColumns} />
+                <Table size="small" pagination={{ pageSize: 5 }} dataSource={workCenters} rowKey="work_center" columns={wcColumns} />
               </div>
             ),
           },
@@ -327,7 +341,7 @@ export default function MasterDataScreen1() {
                   <Input placeholder="Workstation Name" value={newWS.resource_name} onChange={e => setNewWS({ ...newWS, resource_name: e.target.value })} style={{ width: '180px' }} />
                   <Button icon={<PlusOutlined />} onClick={handleAddWS}>ADD</Button>
                 </div>
-                <Table size="small" pagination={false} dataSource={workstations} rowKey="id" columns={wsColumns} />
+                <Table size="small" pagination={{ pageSize: 5 }} dataSource={workstations} rowKey="id" columns={wsColumns} />
               </div>
             ),
           },

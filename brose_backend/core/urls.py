@@ -4,6 +4,7 @@ from .views import (
     RoleListView, RoleDetailView,
     PlantListView, WorkCenterListView, WorkstationListView, MachineListView,
     ReasonTypeListView, ReasonCodeListView, ProductListView, ShiftListView,
+    ShiftPlanningView, TransactionView,
 )
 
 urlpatterns = [
@@ -20,4 +21,6 @@ urlpatterns = [
     path('reason-codes/', ReasonCodeListView.as_view(), name='reason-codes'),
     path('products/', ProductListView.as_view(), name='products'),
     path('shifts/', ShiftListView.as_view(), name='shifts'),
+    path('shift-planning/', ShiftPlanningView.as_view(), name='shift-planning'),
+    path('transactions/', TransactionView.as_view(), name='transactions'),
 ]

@@ -1,6 +1,14 @@
 from rest_framework import serializers
-from .models import TblEmployee, TblEmployeeRole, TblRole, TblFacility, TblWorkCenter, TblResource, TblEquipment, TblReasonCode, TblReasonType, TblProduct, TblShiftDefinition
+from .models import TblEmployee, TblEmployeeRole, TblRole, TblFacility, TblWorkCenter, TblResource, TblEquipment, TblReasonCode, TblReasonType, TblProduct, TblShiftDefinition, TblShiftPlanning
 import re
+
+class ShiftPlanningSerializer(serializers.ModelSerializer):
+    shift_name = serializers.CharField(source='shift.shift_name', read_only=True)
+    work_center_name = serializers.CharField(source='work_center.work_center', read_only=True)
+
+    class Meta:
+        model = TblShiftPlanning
+        fields = ['id', 'shift_name', 'work_center_name', 'active', 'is_active']
 
 class ShiftSerializer(serializers.ModelSerializer):
     duration = serializers.SerializerMethodField()
@@ -8,7 +16,7 @@ class ShiftSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TblShiftDefinition
-        fields = ['id', 'shift_name', 'duration', 'break_time']
+        fields = ['id', 'shift_name', 'duration', 'break_time', 'is_active']
 
     def get_duration(self, obj):
         parts = (obj.shift_sched or '').split('|')
@@ -21,7 +29,7 @@ class ShiftSerializer(serializers.ModelSerializer):
 class ProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = TblProduct
-        fields = ['id', 'product_no', 'description', 'traceability']
+        fields = ['id', 'product_no', 'description', 'traceability', 'is_active']
 
 class ReasonTypeSerializer(serializers.ModelSerializer):
     class Meta:
@@ -58,7 +66,7 @@ class MachineSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TblEquipment
-        fields = ['id', 'equipment', 'workstation_name', 'work_center_name', 'facility_name']
+        fields = ['id', 'equipment', 'workstation_name', 'work_center_name', 'facility_name', 'is_active']
 
 class LoginSerializer(serializers.Serializer):
     employee_no = serializers.CharField()
