@@ -44,12 +44,12 @@ class ReasonCodeSerializer(serializers.ModelSerializer):
 class PlantSerializer(serializers.ModelSerializer):
     class Meta:
         model = TblFacility
-        fields = ['facility']
+        fields = ['facility', 'is_active']
 
 class WorkCenterSerializer(serializers.ModelSerializer):
     class Meta:
         model = TblWorkCenter
-        fields = ['work_center', 'facility']
+        fields = ['work_center', 'facility', 'is_active']
 
 class WorkstationSerializer(serializers.ModelSerializer):
     facility_name = serializers.CharField(source='facility.facility', read_only=True)
@@ -57,7 +57,7 @@ class WorkstationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TblResource
-        fields = ['id', 'resource_name', 'work_center_name', 'facility_name']
+        fields = ['id', 'resource_name', 'work_center_name', 'facility_name', 'is_active']
 
 class MachineSerializer(serializers.ModelSerializer):
     workstation_name = serializers.CharField(source='resource.resource_name', read_only=True)

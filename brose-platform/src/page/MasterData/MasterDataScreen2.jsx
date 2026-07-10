@@ -4,9 +4,9 @@ import { PlusOutlined, SaveOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import colors from '../../theme/colors';
 import constants from '../../theme/constants';
+import apiFetch from '../../utils/apiFetch';
 
 const { Option } = Select;
-const API = 'http://localhost:8000/api';
 const NAME_RE = /^[a-zA-Z0-9\s\-_]+$/;
 
 const styles = {
@@ -39,8 +39,6 @@ const styles = {
 
 export default function MasterDataScreen2() {
   const { modal } = App.useApp();
-  const token = localStorage.getItem('access_token');
-  const authHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
 
   const [products, setProducts] = useState([]);
   const [showInactive, setShowInactive] = useState(false);
@@ -53,22 +51,17 @@ export default function MasterDataScreen2() {
   const [newShift, setNewShift] = useState({ shiftName: '', shiftStart: null, shiftEnd: null, breakStart: null, breakEnd: null });
   const [newPlanning, setNewPlanning] = useState({ shift: '', workCentre: '', active: '' });
 
-  const h = { headers: { 'Authorization': `Bearer ${token}` } };
-
   const fetchProducts = () => {
-    const url = showInactive ? `${API}/products/?all=true` : `${API}/products/`;
-    fetch(url, h).then(r => r.json()).then(d => setProducts(Array.isArray(d) ? d : []));
-    fetch(`${API}/work-centers/`, h).then(r => r.json()).then(d => setWorkCenters(Array.isArray(d) ? d : []));
+    apiFetch(showInactive ? `/products/?all=true` : `/products/`).then(r => r.json()).then(d => setProducts(Array.isArray(d) ? d : []));
+    apiFetch(`/work-centers/`).then(r => r.json()).then(d => setWorkCenters(Array.isArray(d) ? d : []));
   };
 
   const fetchShifts = () => {
-    const url = showInactiveShifts ? `${API}/shifts/?all=true` : `${API}/shifts/`;
-    fetch(url, h).then(r => r.json()).then(d => setShifts(Array.isArray(d) ? d : []));
+    apiFetch(showInactiveShifts ? `/shifts/?all=true` : `/shifts/`).then(r => r.json()).then(d => setShifts(Array.isArray(d) ? d : []));
   };
 
   const fetchShiftPlanning = () => {
-    const url = showInactivePlanning ? `${API}/shift-planning/?all=true` : `${API}/shift-planning/`;
-    fetch(url, h).then(r => r.json()).then(d => setShiftPlanning(Array.isArray(d) ? d : []));
+    apiFetch(showInactivePlanning ? `/shift-planning/?all=true` : `/shift-planning/`).then(r => r.json()).then(d => setShiftPlanning(Array.isArray(d) ? d : []));
   };
 
   useEffect(() => { fetchProducts(); fetchShifts(); fetchShiftPlanning(); }, [showInactive, showInactiveShifts, showInactivePlanning]);
@@ -79,8 +72,8 @@ export default function MasterDataScreen2() {
     if (!newVariant.description.trim()) { modal.error({ title: 'Error', content: 'Description is required.' }); return; }
     if (!NAME_RE.test(newVariant.description.trim())) { modal.error({ title: 'Error', content: 'Description cannot contain special characters.' }); return; }
     if (!newVariant.traceability || newVariant.traceability.length === 0) { modal.error({ title: 'Error', content: 'Please select at least one Traceability Level.' }); return; }
-    const res = await fetch(`${API}/products/`, {
-      method: 'POST', headers: authHeaders,
+    const res = await apiFetch(`/products/`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ product_no: newVariant.materialNumber.trim(), description: newVariant.description.trim(), traceability: newVariant.traceability }),
     });
     const data = await res.json();
@@ -96,7 +89,7 @@ export default function MasterDataScreen2() {
       okType: is_active ? 'danger' : 'primary',
       cancelText: 'Cancel',
       onOk: async () => {
-        const res = await fetch(`${API}/products/`, { method: 'PATCH', headers: authHeaders, body: JSON.stringify({ id }) });
+        const res = await apiFetch(`/products/`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
         const data = await res.json();
         if (res.ok) { fetchProducts(); modal.success({ title: data.message }); }
         else modal.error({ title: 'Error', content: data.error || 'Something went wrong.' });
@@ -127,16 +120,20 @@ export default function MasterDataScreen2() {
     if (!/^[a-zA-Z\s]+$/.test(newShift.shiftName.trim())) { modal.error({ title: 'Error', content: 'Shift Name cannot contain special characters.' }); return; }
     if (!newShift.shiftStart || !newShift.shiftEnd) { modal.error({ title: 'Error', content: 'Shift start and end time are required.' }); return; }
     if (!newShift.shiftEnd.isAfter(newShift.shiftStart)) { modal.error({ title: 'Invalid Timing', content: 'Shift end time must be after start time.' }); return; }
-    if (!newShift.breakStart || !newShift.breakEnd) { modal.error({ title: 'Error', content: 'Break start and end time are required.' }); return; }
-    if (!newShift.breakEnd.isAfter(newShift.breakStart)) { modal.error({ title: 'Invalid Timing', content: 'Break end time must be after break start time.' }); return; }
-    if (!newShift.breakStart.isAfter(newShift.shiftStart) || !newShift.breakEnd.isBefore(newShift.shiftEnd)) {
-      modal.error({ title: 'Invalid Timing', content: 'Break time must be within the shift duration.' }); return;
+    if (newShift.breakStart && newShift.breakEnd) {
+      if (!newShift.breakEnd.isAfter(newShift.breakStart)) { modal.error({ title: 'Invalid Timing', content: 'Break end time must be after break start time.' }); return; }
+      if (!newShift.breakStart.isAfter(newShift.shiftStart) || !newShift.breakEnd.isBefore(newShift.shiftEnd)) {
+        modal.error({ title: 'Invalid Timing', content: 'Break time must be within the shift duration.' }); return;
+      }
+    }
+    if ((newShift.breakStart && !newShift.breakEnd) || (!newShift.breakStart && newShift.breakEnd)) {
+      modal.error({ title: 'Error', content: 'Please provide both break start and end time, or leave both empty.' }); return;
     }
     const fmt = 'h:mm A';
     const duration = `${newShift.shiftStart.format(fmt)} - ${newShift.shiftEnd.format(fmt)}`;
-    const break_time = `${newShift.breakStart.format(fmt)} - ${newShift.breakEnd.format(fmt)}`;
-    const res = await fetch(`${API}/shifts/`, {
-      method: 'POST', headers: authHeaders,
+    const break_time = newShift.breakStart ? `${newShift.breakStart.format(fmt)} - ${newShift.breakEnd.format(fmt)}` : '';
+    const res = await apiFetch(`/shifts/`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ shift_name: newShift.shiftName.trim(), duration, break_time }),
     });
     const data = await res.json();
@@ -153,7 +150,7 @@ export default function MasterDataScreen2() {
       cancelText: 'Cancel',
       onOk: async () => {
         const method = is_active ? 'DELETE' : 'PATCH';
-        const res = await fetch(`${API}/shifts/`, { method, headers: authHeaders, body: JSON.stringify({ id }) });
+        const res = await apiFetch(`/shifts/`, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
         const data = await res.json();
         if (res.ok) { fetchShifts(); modal.success({ title: data.message }); }
         else modal.error({ title: 'Error', content: data.error || 'Something went wrong.' });
@@ -204,8 +201,8 @@ export default function MasterDataScreen2() {
     if (!newPlanning.shift || !newPlanning.workCentre || !newPlanning.active) {
       modal.error({ title: 'Error', content: 'Please fill in all fields.' }); return;
     }
-    const res = await fetch(`${API}/shift-planning/`, {
-      method: 'POST', headers: authHeaders,
+    const res = await apiFetch(`/shift-planning/`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ shift: newPlanning.shift, work_center: newPlanning.workCentre, active: newPlanning.active }),
     });
     const data = await res.json();
@@ -221,7 +218,7 @@ export default function MasterDataScreen2() {
       okType: is_active ? 'danger' : 'primary',
       cancelText: 'Cancel',
       onOk: async () => {
-        const res = await fetch(`${API}/shift-planning/`, { method: 'DELETE', headers: authHeaders, body: JSON.stringify({ id }) });
+        const res = await apiFetch(`/shift-planning/`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
         const data = await res.json();
         if (res.ok) { fetchShiftPlanning(); modal.success({ title: data.message }); }
         else modal.error({ title: 'Error', content: data.error || 'Something went wrong.' });

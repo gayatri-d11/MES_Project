@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Card, Form, Select, Input, Button, Collapse, Table, Space, App, DatePicker } from 'antd';
-import { PlusOutlined, SaveOutlined, EditOutlined } from '@ant-design/icons';
+import { Card, Form, Select, Input, Button, Collapse, Table, App, DatePicker, Typography } from 'antd';
+import { PlusOutlined, SaveOutlined, DeleteOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import colors from '../../theme/colors';
 import constants from '../../theme/constants';
 
+import apiFetch from '../../utils/apiFetch';
+
 const { Option } = Select;
 const { Panel } = Collapse;
-const API = 'http://localhost:8000/api';
 
 const styles = {
   headerCard: { border: `1px solid ${colors.border}`, borderRadius: constants.borderRadius, marginBottom: constants.spacing.lg },
@@ -50,13 +51,37 @@ const complaintColumns = [
   { title: 'Complaint Details', dataIndex: 'details', key: 'details' },
 ];
 
-function SectionTable({ title, inputFields, columns, data, onAdd, disabled }) {
+function SectionTable({ title, inputFields, columns, data, onAdd, onDelete, disabled }) {
   const [rowInput, setRowInput] = useState({});
+  const [error, setError] = useState('');
 
   const handleAdd = () => {
+    const missing = inputFields.filter(f => f.required !== false && !rowInput[f.key]);
+    if (missing.length > 0) {
+      setError(`Please fill in: ${missing.map(f => f.label).join(', ')}`);
+      return;
+    }
+    setError('');
     if (onAdd) onAdd(rowInput);
     setRowInput({});
   };
+
+  const deleteCol = {
+    title: '',
+    key: 'action',
+    width: 40,
+    render: (_, record) => (
+      <Button
+        type="text"
+        danger
+        size="small"
+        icon={<DeleteOutlined />}
+        onClick={() => onDelete && onDelete(record.key)}
+      />
+    ),
+  };
+
+  const tableColumns = disabled ? columns : [...columns, deleteCol];
 
   return (
     <div style={styles.subSection}>
@@ -64,37 +89,40 @@ function SectionTable({ title, inputFields, columns, data, onAdd, disabled }) {
         <span style={styles.subSectionTitle}>{title}</span>
       </div>
       {!disabled && (
-        <div style={styles.inputRow}>
-          {inputFields.map((field, index) => (
-            <div key={index} style={styles.inputItem}>
-              <span style={styles.inputLabel}>{field.label}</span>
-              {field.type === 'select' ? (
-                <Select
-                  placeholder={`Select ${field.label}`}
-                  style={{ width: '160px' }}
-                  size="small"
-                  value={rowInput[field.key] || undefined}
-                  onChange={(val) => setRowInput({ ...rowInput, [field.key]: val })}
-                >
-                  {field.options.map((opt, i) => (
-                    <Option key={i} value={opt.value}>{opt.label}</Option>
-                  ))}
-                </Select>
-              ) : (
-                <Input
-                  placeholder={field.label}
-                  style={{ width: '160px' }}
-                  size="small"
-                  value={rowInput[field.key] || ''}
-                  onChange={(e) => setRowInput({ ...rowInput, [field.key]: e.target.value })}
-                />
-              )}
-            </div>
-          ))}
-          <Button icon={<PlusOutlined />} size="small" style={{ alignSelf: 'flex-end' }} onClick={handleAdd}>ADD</Button>
+        <div style={{ marginBottom: constants.spacing.md }}>
+          <div style={styles.inputRow}>
+            {inputFields.map((field, index) => (
+              <div key={index} style={styles.inputItem}>
+                <span style={styles.inputLabel}>{field.label}</span>
+                {field.type === 'select' ? (
+                  <Select
+                    placeholder={`Select ${field.label}`}
+                    style={{ width: '160px' }}
+                    size="small"
+                    value={rowInput[field.key] || undefined}
+                    onChange={(val) => { setRowInput({ ...rowInput, [field.key]: val }); setError(''); }}
+                  >
+                    {field.options.map((opt, i) => (
+                      <Option key={i} value={opt.value}>{opt.label}</Option>
+                    ))}
+                  </Select>
+                ) : (
+                  <Input
+                    placeholder={field.label}
+                    style={{ width: '160px' }}
+                    size="small"
+                    value={rowInput[field.key] || ''}
+                    onChange={(e) => { setRowInput({ ...rowInput, [field.key]: e.target.value }); setError(''); }}
+                  />
+                )}
+              </div>
+            ))}
+            <Button icon={<PlusOutlined />} size="small" style={{ alignSelf: 'flex-end' }} onClick={handleAdd}>ADD</Button>
+          </div>
+          {error && <Typography.Text type="danger" style={{ fontSize: '12px' }}>{error}</Typography.Text>}
         </div>
       )}
-      <Table columns={columns} dataSource={data} pagination={{ pageSize: 5 }} size="small" scroll={{ x: true }} />
+      <Table columns={tableColumns} dataSource={data} pagination={{ pageSize: 5 }} size="small" scroll={{ x: true }} />
     </div>
   );
 }
@@ -103,8 +131,7 @@ export default function TransactionPage() {
   const { modal } = App.useApp();
   const token = localStorage.getItem('access_token');
   const employeeNo = (() => { try { return JSON.parse(atob(token.split('.')[1])).employee_no; } catch { return ''; } })();
-  const authHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
-  const h = { headers: { 'Authorization': `Bearer ${token}` } };
+  const authHeaders = { 'Content-Type': 'application/json' };
 
   const [activeKeys, setActiveKeys] = useState([]);
   const [readOnly, setReadOnly] = useState(true);
@@ -132,13 +159,13 @@ export default function TransactionPage() {
   const [complaintData, setComplaintData] = useState([]);
 
   useEffect(() => {
-    fetch(`${API}/plants/`, h).then(r => r.json()).then(d => setPlants(Array.isArray(d) ? d : []));
-    fetch(`${API}/work-centers/`, h).then(r => r.json()).then(d => setWorkCenters(Array.isArray(d) ? d : []));
-    fetch(`${API}/workstations/`, h).then(r => r.json()).then(d => setWorkstations(Array.isArray(d) ? d : []));
-    fetch(`${API}/machines/`, h).then(r => r.json()).then(d => setMachineLayout(Array.isArray(d) ? d : []));
-    fetch(`${API}/reason-codes/`, h).then(r => r.json()).then(d => setReasonCodes(Array.isArray(d) ? d : []));
-    fetch(`${API}/products/`, h).then(r => r.json()).then(d => setVariants(Array.isArray(d) ? d : []));
-    fetch(`${API}/shifts/`, h).then(r => r.json()).then(d => setShifts(Array.isArray(d) ? d : []));
+    apiFetch(`/plants/`).then(r => r.json()).then(d => setPlants(Array.isArray(d) ? d : []));
+    apiFetch(`/work-centers/`).then(r => r.json()).then(d => setWorkCenters(Array.isArray(d) ? d : []));
+    apiFetch(`/workstations/`).then(r => r.json()).then(d => setWorkstations(Array.isArray(d) ? d : []));
+    apiFetch(`/machines/`).then(r => r.json()).then(d => setMachineLayout(Array.isArray(d) ? d : []));
+    apiFetch(`/reason-codes/`).then(r => r.json()).then(d => setReasonCodes(Array.isArray(d) ? d : []));
+    apiFetch(`/products/`).then(r => r.json()).then(d => setVariants(Array.isArray(d) ? d : []));
+    apiFetch(`/shifts/`).then(r => r.json()).then(d => setShifts(Array.isArray(d) ? d : []));
   }, []);
 
   const filteredWCs = useMemo(() => workCenters.filter(w => w.facility === selectedPlant), [workCenters, selectedPlant]);
@@ -149,8 +176,11 @@ export default function TransactionPage() {
   const variantOptions = useMemo(() => variants.map(v => ({ value: v.product_no, label: v.product_no })), [variants]);
 
   const addRow = (setter, existing, row) => {
-    if (!row || Object.keys(row).length === 0) return;
     setter([...existing, { ...row, key: Date.now().toString() }]);
+  };
+
+  const deleteRow = (setter, existing, key) => {
+    setter(existing.filter(r => r.key !== key));
   };
 
   const handleShow = async () => {
@@ -159,7 +189,7 @@ export default function TransactionPage() {
       return;
     }
     const dateStr = selectedDate.format('YYYY-MM-DD');
-    const res = await fetch(`${API}/transactions/?facility=${selectedPlant}&work_center=${selectedWorkCentre}&shift=${selectedShift}&date=${dateStr}`, h);
+    const res = await apiFetch(`/transactions/?facility=${selectedPlant}&work_center=${selectedWorkCentre}&shift=${selectedShift}&date=${dateStr}`);
     const data = await res.json();
     if (!res.ok) { modal.error({ title: 'Error', content: data.error }); return; }
 
@@ -181,11 +211,21 @@ export default function TransactionPage() {
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = () => {
     if (!selectedPlant || !selectedWorkCentre || !selectedShift || !selectedDate) {
       modal.error({ title: 'Error', content: 'Please fill in all header fields.' });
       return;
     }
+    modal.confirm({
+      title: 'Save Transaction',
+      content: 'This will overwrite any existing transaction for the selected Plant, Work Centre, Shift and Date. Continue?',
+      okText: 'Save',
+      okType: 'primary',
+      onOk: doSave,
+    });
+  };
+
+  const doSave = async () => {
     const payload = {
       facility: selectedPlant,
       work_center: selectedWorkCentre,
@@ -198,10 +238,10 @@ export default function TransactionPage() {
       production: productionData,
       complaints: complaintData,
     };
-    const res = await fetch(`${API}/transactions/`, { method: 'POST', headers: authHeaders, body: JSON.stringify(payload) });
-    const data = await res.json();
-    if (res.ok) { modal.success({ title: data.message }); setReadOnly(true); }
-    else modal.error({ title: 'Error', content: data.error || 'Failed to save transaction.' });
+    const res = await apiFetch(`/transactions/`, { method: 'POST', headers: authHeaders, body: JSON.stringify(payload) });
+    const json = await res.json();
+    if (res.ok) { modal.success({ title: json.message }); setReadOnly(true); }
+    else modal.error({ title: 'Error', content: json.error || 'Failed to save transaction.' });
   };
 
   return (
@@ -237,7 +277,21 @@ export default function TransactionPage() {
             </Form.Item>
             <Form.Item style={styles.formItem}>
               <Button style={{ borderColor: colors.secondaryText, color: colors.secondaryText }}
-                onClick={() => setReadOnly(false)} disabled={!readOnly}>EDIT</Button>
+                disabled={!readOnly}
+                onClick={() => {
+                  const hasData = machineDowntimeData.length || targetCycleData.length || resourceData.length || productionData.length || complaintData.length;
+                  if (hasData) {
+                    modal.confirm({
+                      title: 'Edit Transaction',
+                      content: 'You are about to edit an existing transaction. Any unsaved changes will be lost if you reload. Continue?',
+                      okText: 'Edit',
+                      onOk: () => setReadOnly(false),
+                    });
+                  } else {
+                    setReadOnly(false);
+                  }
+                }}
+              >EDIT</Button>
             </Form.Item>
             <Form.Item style={styles.formItem}>
               <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} disabled={readOnly}>SAVE</Button>
@@ -256,6 +310,7 @@ export default function TransactionPage() {
               data={machineDowntimeData}
               disabled={readOnly}
               onAdd={(row) => addRow(setMachineDowntimeData, machineDowntimeData, row)}
+              onDelete={(key) => deleteRow(setMachineDowntimeData, machineDowntimeData, key)}
               inputFields={[
                 { label: 'Module', key: 'module', type: 'select', options: modules },
                 { label: 'Reason Code', key: 'reasonCode', type: 'select', options: downtimeReasonCodes },
@@ -268,6 +323,7 @@ export default function TransactionPage() {
               data={targetCycleData}
               disabled={readOnly}
               onAdd={(row) => addRow(setTargetCycleData, targetCycleData, row)}
+              onDelete={(key) => deleteRow(setTargetCycleData, targetCycleData, key)}
               inputFields={[
                 { label: 'Module', key: 'module', type: 'select', options: modules },
                 { label: 'Target Cycle Time (Seconds)', key: 'targetCycle', type: 'input' },
@@ -279,10 +335,11 @@ export default function TransactionPage() {
               data={resourceData}
               disabled={readOnly}
               onAdd={(row) => addRow(setResourceData, resourceData, row)}
+              onDelete={(key) => deleteRow(setResourceData, resourceData, key)}
               inputFields={[
                 { label: 'Work Station', key: 'workStation', type: 'select', options: workStationOptions },
                 { label: 'Resource Count', key: 'resourceCount', type: 'input' },
-                { label: 'Resource Names', key: 'resourceNames', type: 'input' },
+                { label: 'Resource Names', key: 'resourceNames', type: 'input', required: false },
               ]}
             />
           </Panel>
@@ -294,12 +351,13 @@ export default function TransactionPage() {
               data={productionData}
               disabled={readOnly}
               onAdd={(row) => addRow(setProductionData, productionData, row)}
+              onDelete={(key) => deleteRow(setProductionData, productionData, key)}
               inputFields={[
                 { label: 'Variant Type', key: 'variantType', type: 'select', options: variantOptions },
                 { label: 'OK Count', key: 'okCount', type: 'input' },
-                { label: 'NOK Count', key: 'nokCount', type: 'input' },
-                { label: 'NOK Type', key: 'nokType', type: 'select', options: [{ value: 'Scrap', label: 'Scrap' }, { value: 'Rework', label: 'Rework' }, { value: 'Retest', label: 'Retest' }] },
-                { label: 'NOK Reason Code', key: 'nokReasonCode', type: 'select', options: nokReasonCodes },
+                { label: 'NOK Count', key: 'nokCount', type: 'input', required: false },
+                { label: 'NOK Type', key: 'nokType', type: 'select', options: [{ value: 'Scrap', label: 'Scrap' }, { value: 'Rework', label: 'Rework' }, { value: 'Retest', label: 'Retest' }], required: false },
+                { label: 'NOK Reason Code', key: 'nokReasonCode', type: 'select', options: nokReasonCodes, required: false },
               ]}
             />
           </Panel>
@@ -311,10 +369,11 @@ export default function TransactionPage() {
               data={complaintData}
               disabled={readOnly}
               onAdd={(row) => addRow(setComplaintData, complaintData, row)}
+              onDelete={(key) => deleteRow(setComplaintData, complaintData, key)}
               inputFields={[
                 { label: 'Variant Type', key: 'variantType', type: 'select', options: variantOptions },
                 { label: 'Reason', key: 'reason', type: 'input' },
-                { label: 'Complaint Details', key: 'details', type: 'input' },
+                { label: 'Complaint Details', key: 'details', type: 'input', required: false },
               ]}
             />
           </Panel>

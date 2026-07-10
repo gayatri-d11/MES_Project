@@ -265,10 +265,22 @@ class PlantListView(APIView):
             plant = TblFacility.objects.get(facility=name)
         except TblFacility.DoesNotExist:
             return Response({'error': 'Plant not found.'}, status=status.HTTP_404_NOT_FOUND)
-        plant.is_active = not plant.is_active
-        plant.save()
-        state = 'activated' if plant.is_active else 'deactivated'
-        return Response({'message': f'Plant {state} successfully.'})
+        if plant.is_active:
+            # Deactivate cascade: WC → WS → Machines
+            wcs = TblWorkCenter.objects.filter(facility=plant, is_active=True)
+            for wc in wcs:
+                ws_list = TblResource.objects.filter(work_center=wc, is_active=True)
+                for ws in ws_list:
+                    TblEquipment.objects.filter(resource=ws, is_active=True).update(is_active=False)
+                ws_list.update(is_active=False)
+            wcs.update(is_active=False)
+            plant.is_active = False
+            plant.save()
+            return Response({'message': 'Plant and all related Work Centers, Workstations, and Machines deactivated successfully.'})
+        else:
+            plant.is_active = True
+            plant.save()
+            return Response({'message': 'Plant activated successfully.'})
 
     def delete(self, request):
         name = request.data.get('facility', '').strip()
@@ -329,10 +341,19 @@ class WorkCenterListView(APIView):
             wc = TblWorkCenter.objects.get(work_center=name)
         except TblWorkCenter.DoesNotExist:
             return Response({'error': 'Work Center not found.'}, status=status.HTTP_404_NOT_FOUND)
-        wc.is_active = not wc.is_active
-        wc.save()
-        state = 'activated' if wc.is_active else 'deactivated'
-        return Response({'message': f'Work Center {state} successfully.'})
+        if wc.is_active:
+            # Deactivate cascade: WS → Machines
+            ws_list = TblResource.objects.filter(work_center=wc, is_active=True)
+            for ws in ws_list:
+                TblEquipment.objects.filter(resource=ws, is_active=True).update(is_active=False)
+            ws_list.update(is_active=False)
+            wc.is_active = False
+            wc.save()
+            return Response({'message': 'Work Center and all related Workstations and Machines deactivated successfully.'})
+        else:
+            wc.is_active = True
+            wc.save()
+            return Response({'message': 'Work Center activated successfully.'})
 
     def delete(self, request):
         name = request.data.get('work_center', '').strip()
@@ -486,11 +507,32 @@ class ReasonTypeListView(APIView):
 
 class ReasonCodeListView(APIView):
     permission_classes = []
-    http_method_names = ['get', 'post', 'delete']
+    http_method_names = ['get', 'post', 'patch', 'delete']
 
     def get(self, request):
         codes = TblReasonCode.objects.filter(is_active=True).select_related('reason_type')
         return Response(ReasonCodeSerializer(codes, many=True).data)
+
+    def patch(self, request):
+        reason_code = request.data.get('reason_code', '').strip()
+        try:
+            rc = TblReasonCode.objects.get(reason_code=reason_code)
+        except TblReasonCode.DoesNotExist:
+            return Response({'error': 'Reason Code not found.'}, status=status.HTTP_404_NOT_FOUND)
+        description = request.data.get('description', '').strip()
+        category = request.data.get('category', '').strip()
+        reason_type_text = request.data.get('reason_type_text', '').strip()
+        if not description:
+            return Response({'error': 'Description is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not category:
+            return Response({'error': 'Category is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not reason_type_text:
+            return Response({'error': 'Reason Type is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        rc.description = description
+        rc.category = category
+        rc.reason_type_text = reason_type_text
+        rc.save()
+        return Response({'message': 'Reason Code updated successfully.'})
 
     def post(self, request):
         reason_code = request.data.get('reason_code', '').strip()
@@ -567,8 +609,6 @@ class ShiftListView(APIView):
             return Response({'error': 'Shift Name cannot contain special characters.'}, status=status.HTTP_400_BAD_REQUEST)
         if not duration:
             return Response({'error': 'Shift Duration is required.'}, status=status.HTTP_400_BAD_REQUEST)
-        if not break_time:
-            return Response({'error': 'Break Time is required.'}, status=status.HTTP_400_BAD_REQUEST)
         if TblShiftDefinition.objects.filter(shift_name=shift_name, is_active=True).exists():
             return Response({'error': 'Shift Name already exists.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -589,6 +629,22 @@ class ShiftListView(APIView):
             shift = TblShiftDefinition.objects.get(id=shift_id)
         except TblShiftDefinition.DoesNotExist:
             return Response({'error': 'Shift not found.'}, status=status.HTTP_404_NOT_FOUND)
+        # Edit mode — if duration sent, update fields
+        if 'duration' in request.data:
+            shift_name = request.data.get('shift_name', '').strip()
+            duration = request.data.get('duration', '').strip()
+            break_time = request.data.get('break_time', '').strip()
+            if not shift_name:
+                return Response({'error': 'Shift Name is required.'}, status=status.HTTP_400_BAD_REQUEST)
+            if not duration:
+                return Response({'error': 'Shift Duration is required.'}, status=status.HTTP_400_BAD_REQUEST)
+            if TblShiftDefinition.objects.filter(shift_name=shift_name).exclude(id=shift_id).exists():
+                return Response({'error': 'Shift Name already exists.'}, status=status.HTTP_400_BAD_REQUEST)
+            shift.shift_name = shift_name
+            shift.shift_sched = f'{duration}|{break_time}'
+            shift.save()
+            return Response({'message': 'Shift updated successfully.'})
+        # Toggle active
         shift.is_active = not shift.is_active
         shift.save()
         state = 'activated' if shift.is_active else 'deactivated'
@@ -680,9 +736,16 @@ class TransactionView(APIView):
 
         try:
             shift = TblShiftDefinition.objects.get(shift_name=shift_name, is_active=True)
+        except TblShiftDefinition.DoesNotExist:
+            return Response({'error': 'Shift not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
             planning = TblShiftPlanning.objects.get(shift=shift, work_center__work_center=work_center)
-        except (TblShiftDefinition.DoesNotExist, TblShiftPlanning.DoesNotExist):
-            return Response({'error': 'No shift planning found for this combination.'}, status=status.HTTP_404_NOT_FOUND)
+        except TblShiftPlanning.DoesNotExist:
+            planning = None
+
+        if not planning:
+            return Response({'exists': False})
 
         labour = TblResourceLabour.objects.filter(
             facility__facility=facility,
@@ -694,15 +757,32 @@ class TransactionView(APIView):
         if not labour:
             return Response({'exists': False})
 
-        downtime = list(TblResourceLabourDetailModuleDowntime.objects.filter(parent=labour).values(
-            'id', module=django_models.F('resource__equipment__equipment'), reason_code=django_models.F('reason_code__reason_code'), duration=django_models.F('duration')
-        ))
-        target_cycle = list(TblResourceLabourDetailModule.objects.filter(parent=labour).values(
-            'id', module=django_models.F('resource__equipment__equipment'), targetCycle=django_models.F('target_cycle_time')
-        ))
-        resource_plan = list(TblResourceLabourDetailWorkstation.objects.filter(parent=labour).values(
-            'id', workStation=django_models.F('resource__resource_name'), resourceCount=django_models.F('resource_count'), resourceNames=django_models.F('resource_names')
-        ))
+        downtime = [
+            {
+                'id': d.id,
+                'module': TblEquipment.objects.filter(resource=d.resource).values_list('equipment', flat=True).first(),
+                'reasonCode': d.reason_code.reason_code,
+                'duration': d.duration,
+            }
+            for d in TblResourceLabourDetailModuleDowntime.objects.filter(parent=labour).select_related('resource', 'reason_code')
+        ]
+        target_cycle = [
+            {
+                'id': t.id,
+                'module': TblEquipment.objects.filter(resource=t.resource).values_list('equipment', flat=True).first(),
+                'targetCycle': t.target_cycle_time,
+            }
+            for t in TblResourceLabourDetailModule.objects.filter(parent=labour).select_related('resource')
+        ]
+        resource_plan = [
+            {
+                'id': r.id,
+                'workStation': r.resource.resource_name,
+                'resourceCount': r.resource_count,
+                'resourceNames': r.resource_names,
+            }
+            for r in TblResourceLabourDetailWorkstation.objects.filter(parent=labour).select_related('resource')
+        ]
 
         production_qs = TblProduction.objects.filter(
             facility__facility=facility, work_center__work_center=work_center,
@@ -710,13 +790,14 @@ class TransactionView(APIView):
         )
         production = []
         for p in production_qs:
-            noks = list(TblNokProduction.objects.filter(parent=p).values(
-                nokCount=django_models.F('nok_count'), nokType=django_models.F('nok_type'), nokReasonCode=django_models.F('nok_reason_code__reason_code')
-            ))
+            nok = TblNokProduction.objects.filter(parent=p).first()
             production.append({
-                'id': p.id, 'variantType': p.product.product_no,
-                'okCount': p.produce_quantity, 'nokCount': p.nok_produced_quantity,
-                'nokDetails': noks,
+                'id': p.id,
+                'variantType': p.product.product_no,
+                'okCount': p.produce_quantity,
+                'nokCount': p.nok_produced_quantity,
+                'nokType': nok.nok_type if nok else '',
+                'nokReasonCode': nok.nok_reason_code.reason_code if nok else '',
             })
 
         parent = TblParent.objects.filter(
@@ -725,9 +806,15 @@ class TransactionView(APIView):
         ).first()
         complaints = []
         if parent:
-            complaints = list(TblCustComplaint.objects.filter(parent=parent).values(
-                'id', variantType=django_models.F('product__product_no'), reason=django_models.F('reason'), details=django_models.F('details')
-            ))
+            complaints = [
+                {
+                    'id': c.id,
+                    'variantType': c.product.product_no,
+                    'reason': c.reason,
+                    'details': c.details,
+                }
+                for c in TblCustComplaint.objects.filter(parent=parent).select_related('product')
+            ]
 
         return Response({
             'exists': True,
@@ -752,20 +839,27 @@ class TransactionView(APIView):
 
         try:
             facility = TblFacility.objects.get(facility=facility_name)
-            work_center = TblWorkCenter.objects.get(work_center=work_center_name)
-            shift = TblShiftDefinition.objects.get(shift_name=shift_name, is_active=True)
-            planning = TblShiftPlanning.objects.get(shift=shift, work_center=work_center)
-            employee = TblEmployee.objects.get(employee_no=employee_no, is_active=True)
         except TblFacility.DoesNotExist:
             return Response({'error': 'Plant not found.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            work_center = TblWorkCenter.objects.get(work_center=work_center_name)
         except TblWorkCenter.DoesNotExist:
             return Response({'error': 'Work Center not found.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            shift = TblShiftDefinition.objects.get(shift_name=shift_name, is_active=True)
         except TblShiftDefinition.DoesNotExist:
             return Response({'error': 'Shift not found.'}, status=status.HTTP_400_BAD_REQUEST)
-        except TblShiftPlanning.DoesNotExist:
-            return Response({'error': 'No shift planning configured for this Work Center and Shift.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            employee = TblEmployee.objects.get(employee_no=employee_no, is_active=True)
         except TblEmployee.DoesNotExist:
             return Response({'error': 'Employee not found.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            planning = TblShiftPlanning.objects.get(shift=shift, work_center=work_center)
+        except TblShiftPlanning.DoesNotExist:
+            new_plan_id = (TblShiftPlanning.objects.order_by('-id').first().id + 1) if TblShiftPlanning.objects.exists() else 1
+            planning = TblShiftPlanning.objects.create(
+                id=new_plan_id, shift=shift, work_center=work_center, active=True
+            )
 
         transaction_date = timezone.datetime.strptime(date_str, '%Y-%m-%d').replace(tzinfo=timezone.utc)
         labour_id = f"{facility_name}-{work_center_name}-{shift_name}-{date_str}"
@@ -790,9 +884,9 @@ class TransactionView(APIView):
                 TblResourceLabourDetailModuleDowntime.objects.create(
                     id=self._next_id(TblResourceLabourDetailModuleDowntime),
                     parent=labour, resource=resource, reason_code=reason_code,
-                    duration=float(row.get('duration', 0)),
+                    duration=float(row.get('duration') or 0),
                 )
-            except (TblEquipment.DoesNotExist, TblReasonCode.DoesNotExist):
+            except (TblEquipment.DoesNotExist, TblReasonCode.DoesNotExist, ValueError):
                 pass
 
         # Save target cycle
@@ -803,9 +897,9 @@ class TransactionView(APIView):
                 TblResourceLabourDetailModule.objects.create(
                     id=self._next_id(TblResourceLabourDetailModule),
                     parent=labour, resource=resource,
-                    target_cycle_time=float(row.get('targetCycle', 0)),
+                    target_cycle_time=float(row.get('targetCycle') or 0),
                 )
-            except TblEquipment.DoesNotExist:
+            except (TblEquipment.DoesNotExist, ValueError):
                 pass
 
         # Save resource planning
@@ -816,10 +910,10 @@ class TransactionView(APIView):
                 TblResourceLabourDetailWorkstation.objects.create(
                     id=self._next_id(TblResourceLabourDetailWorkstation),
                     parent=labour, resource=resource,
-                    resource_count=int(row.get('resourceCount', 0)),
+                    resource_count=int(row.get('resourceCount') or 0),
                     resource_names=row.get('resourceNames', ''),
                 )
-            except TblResource.DoesNotExist:
+            except (TblResource.DoesNotExist, ValueError):
                 pass
 
         # Save production
@@ -883,6 +977,162 @@ class TransactionView(APIView):
         return Response({'message': 'Transaction saved successfully.'}, status=status.HTTP_201_CREATED)
 
 
+class ChangePasswordView(APIView):
+    permission_classes = []
+
+    def post(self, request):
+        employee_no = None
+        try:
+            token = request.headers.get('Authorization', '').replace('Bearer ', '')
+            import jwt
+            payload = jwt.decode(token, options={'verify_signature': False})
+            employee_no = payload.get('employee_no')
+        except Exception:
+            return Response({'error': 'Invalid token.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        current_password = request.data.get('current_password', '')
+        new_password = request.data.get('new_password', '')
+
+        if not current_password or not new_password:
+            return Response({'error': 'Both current and new password are required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if len(new_password) < 8:
+            return Response({'error': 'New password must be at least 8 characters.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not any(c.isupper() for c in new_password):
+            return Response({'error': 'New password must contain at least 1 uppercase letter.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not any(c.isdigit() for c in new_password):
+            return Response({'error': 'New password must contain at least 1 number.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            employee = TblEmployee.objects.get(employee_no=employee_no)
+        except TblEmployee.DoesNotExist:
+            return Response({'error': 'Employee not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not check_password(current_password, employee.pass_word):
+            return Response({'error': 'Current password is incorrect.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        employee.pass_word = make_password(new_password)
+        employee.save()
+        return Response({'message': 'Password changed successfully.'})
+
+
+class ProductionDashboardView(APIView):
+    permission_classes = []
+
+    def get(self, request):
+        facility = request.query_params.get('facility')
+        work_center = request.query_params.get('work_center')
+        workstation = request.query_params.get('workstation')
+        module = request.query_params.get('module')
+        shift_name = request.query_params.get('shift')
+        variant = request.query_params.get('variant')
+        date_from = request.query_params.get('date_from')
+        date_to = request.query_params.get('date_to')
+
+        # Base production queryset
+        prod_qs = TblProduction.objects.select_related('product', 'scheduled_shift__shift', 'work_center', 'facility')
+        if facility:
+            prod_qs = prod_qs.filter(facility__facility=facility)
+        if work_center:
+            prod_qs = prod_qs.filter(work_center__work_center=work_center)
+        if shift_name:
+            prod_qs = prod_qs.filter(scheduled_shift__shift__shift_name=shift_name)
+        if variant:
+            prod_qs = prod_qs.filter(product__product_no=variant)
+        if date_from:
+            prod_qs = prod_qs.filter(transaction_date__date__gte=date_from)
+        if date_to:
+            prod_qs = prod_qs.filter(transaction_date__date__lte=date_to)
+
+        # KPIs
+        total_ok = sum(p.produce_quantity or 0 for p in prod_qs)
+        total_nok = sum(p.nok_produced_quantity or 0 for p in prod_qs)
+        total = total_ok + total_nok
+        quality = round((total_ok / total * 100), 1) if total > 0 else 0
+
+        # Downtime queryset
+        dt_qs = TblResourceLabourDetailModuleDowntime.objects.select_related('reason_code', 'resource')
+        if facility:
+            dt_qs = dt_qs.filter(parent__facility__facility=facility)
+        if work_center:
+            dt_qs = dt_qs.filter(parent__work_center__work_center=work_center)
+        if shift_name:
+            dt_qs = dt_qs.filter(parent__scheduled_shift__shift__shift_name=shift_name)
+        if workstation:
+            dt_qs = dt_qs.filter(resource__resource_name=workstation)
+        if module:
+            dt_qs = dt_qs.filter(resource__tblequipment__equipment=module)
+        if date_from:
+            dt_qs = dt_qs.filter(parent__transaction_date__date__gte=date_from)
+        if date_to:
+            dt_qs = dt_qs.filter(parent__transaction_date__date__lte=date_to)
+
+        total_downtime = float(sum(d.duration or 0 for d in dt_qs))
+
+        # Production by variant
+        variant_map = {}
+        for p in prod_qs:
+            key = p.product.product_no
+            if key not in variant_map:
+                variant_map[key] = {'variant': key, 'ok': 0, 'nok': 0}
+            variant_map[key]['ok'] += p.produce_quantity or 0
+            variant_map[key]['nok'] += p.nok_produced_quantity or 0
+        production_by_variant = list(variant_map.values())
+
+        # Downtime by reason code
+        reason_map = {}
+        for d in dt_qs:
+            key = d.reason_code.reason_code
+            if key not in reason_map:
+                reason_map[key] = {'reasonCode': key, 'description': d.reason_code.description or key, 'duration': 0}
+            reason_map[key]['duration'] += float(d.duration or 0)
+        downtime_by_reason = list(reason_map.values())
+
+        # Production trend by date
+        trend_map = {}
+        for p in prod_qs:
+            day = str(p.transaction_date.date())
+            if day not in trend_map:
+                trend_map[day] = {'date': day, 'ok': 0, 'nok': 0}
+            trend_map[day]['ok'] += p.produce_quantity or 0
+            trend_map[day]['nok'] += p.nok_produced_quantity or 0
+        production_trend = sorted(trend_map.values(), key=lambda x: x['date'])
+
+        # NOK by type
+        nok_qs = TblNokProduction.objects.select_related('nok_reason_code')
+        if facility:
+            nok_qs = nok_qs.filter(parent__facility__facility=facility)
+        if work_center:
+            nok_qs = nok_qs.filter(parent__work_center__work_center=work_center)
+        if shift_name:
+            nok_qs = nok_qs.filter(parent__scheduled_shift__shift__shift_name=shift_name)
+        if variant:
+            nok_qs = nok_qs.filter(parent__product__product_no=variant)
+        if date_from:
+            nok_qs = nok_qs.filter(parent__transaction_date__date__gte=date_from)
+        if date_to:
+            nok_qs = nok_qs.filter(parent__transaction_date__date__lte=date_to)
+
+        nok_type_map = {}
+        for n in nok_qs:
+            key = n.nok_type or 'Unknown'
+            nok_type_map[key] = nok_type_map.get(key, 0) + (n.nok_count or 0)
+        nok_by_type = [{'type': k, 'count': v} for k, v in nok_type_map.items()]
+
+        return Response({
+            'kpis': {
+                'totalOk': total_ok,
+                'totalNok': total_nok,
+                'totalProduction': total,
+                'quality': quality,
+                'totalDowntime': total_downtime,
+            },
+            'productionByVariant': production_by_variant,
+            'downtimeByReason': downtime_by_reason,
+            'productionTrend': production_trend,
+            'nokByType': nok_by_type,
+        })
+
+
 class ProductListView(APIView):
     permission_classes = []
     http_method_names = ['get', 'post', 'patch', 'delete']
@@ -934,6 +1184,20 @@ class ProductListView(APIView):
             product = TblProduct.objects.get(id=product_id)
         except TblProduct.DoesNotExist:
             return Response({'error': 'Product not found.'}, status=status.HTTP_404_NOT_FOUND)
+        # Edit mode — if description sent, update fields
+        if 'description' in request.data:
+            description = request.data.get('description', '').strip()
+            traceability = request.data.get('traceability', [])
+            if not description:
+                return Response({'error': 'Description is required.'}, status=status.HTTP_400_BAD_REQUEST)
+            traceability_list = traceability if isinstance(traceability, list) else [traceability]
+            product.description = description
+            product.traceability = ','.join(traceability_list) if traceability_list else 'None'
+            product.lot_tracking_code = 1 if 'Batch' in traceability_list else 0
+            product.serial_tracking_code = 1 if 'Serial' in traceability_list else 0
+            product.save()
+            return Response({'message': 'Product updated successfully.'})
+        # Toggle active
         product.is_active = not product.is_active
         product.save()
         state = 'activated' if product.is_active else 'deactivated'

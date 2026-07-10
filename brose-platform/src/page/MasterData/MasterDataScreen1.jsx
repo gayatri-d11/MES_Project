@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Button, Table, Input, Select, App, Modal, Tabs, Switch } from 'antd';
-import { PlusOutlined, SaveOutlined, SettingOutlined } from '@ant-design/icons';
+import { PlusOutlined, SaveOutlined, SettingOutlined, EditOutlined } from '@ant-design/icons';
 import colors from '../../theme/colors';
 import constants from '../../theme/constants';
-
-const API = 'http://localhost:8000/api';
+import apiFetch from '../../utils/apiFetch';
 const NAME_RE = /^[a-zA-Z0-9\s\-_]+$/;
 
 const styles = {
@@ -55,14 +54,16 @@ export default function MasterDataScreen1() {
   const [newPlant, setNewPlant] = useState('');
   const [newWC, setNewWC] = useState({ work_center: '', facility: '' });
   const [newWS, setNewWS] = useState({ resource_name: '', work_center: '' });
+  const [showInactivePlants, setShowInactivePlants] = useState(false);
+  const [showInactiveWCs, setShowInactiveWCs] = useState(false);
+  const [showInactiveWSs, setShowInactiveWSs] = useState(false);
+  const [editReason, setEditReason] = useState(null);
 
   const fetchAll = () => {
-    const h = { headers: { 'Authorization': `Bearer ${token}` } };
-    fetch(`${API}/plants/`, h).then(r => r.json()).then(d => setPlants(Array.isArray(d) ? d : []));
-    fetch(`${API}/work-centers/`, h).then(r => r.json()).then(d => setWorkCenters(Array.isArray(d) ? d : []));
-    fetch(`${API}/workstations/`, h).then(r => r.json()).then(d => setWorkstations(Array.isArray(d) ? d : []));
-    const machineUrl = showInactiveMachines ? `${API}/machines/?all=true` : `${API}/machines/`;
-    fetch(machineUrl, h).then(r => r.json()).then(d => {
+    apiFetch(`/plants/${showInactivePlants ? '?all=true' : ''}`).then(r => r.json()).then(d => setPlants(Array.isArray(d) ? d : []));
+    apiFetch(`/work-centers/${showInactiveWCs ? '?all=true' : ''}`).then(r => r.json()).then(d => setWorkCenters(Array.isArray(d) ? d : []));
+    apiFetch(`/workstations/${showInactiveWSs ? '?all=true' : ''}`).then(r => r.json()).then(d => setWorkstations(Array.isArray(d) ? d : []));
+    apiFetch(showInactiveMachines ? `/machines/?all=true` : `/machines/`).then(r => r.json()).then(d => {
       if (Array.isArray(d)) {
         setMachineLayout(d.map(m => ({
           key: String(m.id), id: m.id,
@@ -72,14 +73,14 @@ export default function MasterDataScreen1() {
         })));
       }
     });
-    fetch(`${API}/reason-codes/`, h).then(r => r.json()).then(d => setReasonCodes(Array.isArray(d) ? d : []));
-    fetch(`${API}/reason-types/`, h).then(r => r.json()).then(d => setReasonTypes(Array.isArray(d) ? d : []));
+    apiFetch(`/reason-codes/`).then(r => r.json()).then(d => setReasonCodes(Array.isArray(d) ? d : []));
+    apiFetch(`/reason-types/`).then(r => r.json()).then(d => setReasonTypes(Array.isArray(d) ? d : []));
   };
 
-  useEffect(() => { fetchAll(); }, [showInactiveMachines]);
+  useEffect(() => { fetchAll(); }, [showInactiveMachines, showInactivePlants, showInactiveWCs, showInactiveWSs]);
 
-  const filteredWCs = workCenters.filter(w => w.facility === newMachine.plant);
-  const filteredWSs = workstations.filter(w => w.work_center_name === newMachine.workCentre);
+  const filteredWCs = workCenters.filter(w => w.facility === newMachine.plant && w.is_active);
+  const filteredWSs = workstations.filter(w => w.work_center_name === newMachine.workCentre && w.is_active);
 
   const validateName = (name, label) => {
     if (!name.trim()) { modal.error({ title: 'Error', content: `${label} is required.` }); return false; }
@@ -96,7 +97,7 @@ export default function MasterDataScreen1() {
       cancelText: 'Cancel',
       onOk: async () => {
         const method = is_active ? 'DELETE' : 'PATCH';
-        const res = await fetch(`${API}/machines/`, { method, headers: authHeaders, body: JSON.stringify({ id }) });
+        const res = await apiFetch(`/machines/`, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
         const data = await res.json();
         if (res.ok) { fetchAll(); modal.success({ title: data.message }); }
         else modal.error({ title: 'Error', content: data.error || 'Something went wrong.' });
@@ -111,8 +112,8 @@ export default function MasterDataScreen1() {
     if (!validateName(newMachine.module, 'Module name')) return;
     const ws = workstations.find(w => w.resource_name === newMachine.workStation);
     if (!ws) { modal.error({ title: 'Error', content: 'Workstation not found.' }); return; }
-    const res = await fetch(`${API}/machines/`, {
-      method: 'POST', headers: authHeaders,
+    const res = await apiFetch(`/machines/`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ equipment: newMachine.module.trim(), resource_id: ws.id }),
     });
     const data = await res.json();
@@ -130,8 +131,8 @@ export default function MasterDataScreen1() {
     if (!newReason.reasonType.trim()) { modal.error({ title: 'Error', content: 'Reason Type is required.' }); return; }
     if (!/^[a-zA-Z0-9\s\-_:]+$/.test(newReason.reasonType.trim())) { modal.error({ title: 'Error', content: 'Reason Type cannot contain special characters.' }); return; }
     const selectedType = reasonTypes.find(rt => rt.reason_type === newReason.reasonType.trim());
-    const res = await fetch(`${API}/reason-codes/`, {
-      method: 'POST', headers: authHeaders,
+    const res = await apiFetch(`/reason-codes/`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         reason_code: newReason.reasonCode.trim(),
         description: newReason.description.trim(),
@@ -144,9 +145,22 @@ export default function MasterDataScreen1() {
     else modal.error({ title: 'Error', content: data.error || 'Something went wrong.' });
   };
 
+  const handleEditReason = async () => {
+    if (!editReason.description.trim()) { modal.error({ title: 'Error', content: 'Description is required.' }); return; }
+    if (!editReason.category.trim()) { modal.error({ title: 'Error', content: 'Category is required.' }); return; }
+    if (!editReason.reasonType.trim()) { modal.error({ title: 'Error', content: 'Reason Type is required.' }); return; }
+    const res = await apiFetch(`/reason-codes/`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason_code: editReason.reason_code, description: editReason.description.trim(), category: editReason.category.trim(), reason_type_text: editReason.reasonType.trim() }),
+    });
+    const data = await res.json();
+    if (res.ok) { fetchAll(); setEditReason(null); modal.success({ title: data.message }); }
+    else modal.error({ title: 'Error', content: data.error || 'Something went wrong.' });
+  };
+
   const handleAddPlant = async () => {
     if (!validateName(newPlant, 'Plant name')) return;
-    const res = await fetch(`${API}/plants/`, { method: 'POST', headers: authHeaders, body: JSON.stringify({ facility: newPlant.trim() }) });
+    const res = await apiFetch(`/plants/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ facility: newPlant.trim() }) });
     const data = await res.json();
     if (res.ok) { fetchAll(); setNewPlant(''); modal.success({ title: data.message }); }
     else modal.error({ title: 'Error', content: data.error || 'Something went wrong.' });
@@ -155,7 +169,7 @@ export default function MasterDataScreen1() {
   const handleAddWC = async () => {
     if (!validateName(newWC.work_center, 'Work Center name')) return;
     if (!newWC.facility) { modal.error({ title: 'Error', content: 'Please select a Plant.' }); return; }
-    const res = await fetch(`${API}/work-centers/`, { method: 'POST', headers: authHeaders, body: JSON.stringify(newWC) });
+    const res = await apiFetch(`/work-centers/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newWC) });
     const data = await res.json();
     if (res.ok) { fetchAll(); setNewWC({ work_center: '', facility: '' }); modal.success({ title: data.message }); }
     else modal.error({ title: 'Error', content: data.error || 'Something went wrong.' });
@@ -164,7 +178,7 @@ export default function MasterDataScreen1() {
   const handleAddWS = async () => {
     if (!validateName(newWS.resource_name, 'Workstation name')) return;
     if (!newWS.work_center) { modal.error({ title: 'Error', content: 'Please select a Work Center.' }); return; }
-    const res = await fetch(`${API}/workstations/`, { method: 'POST', headers: authHeaders, body: JSON.stringify(newWS) });
+    const res = await apiFetch(`/workstations/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newWS) });
     const data = await res.json();
     if (res.ok) { fetchAll(); setNewWS({ resource_name: '', work_center: '' }); modal.success({ title: data.message }); }
     else modal.error({ title: 'Error', content: data.error || 'Something went wrong.' });
@@ -194,24 +208,100 @@ export default function MasterDataScreen1() {
     { title: 'Description', dataIndex: 'description', key: 'description' },
     { title: 'Category', dataIndex: 'category', key: 'category' },
     { title: 'Reason Type', dataIndex: 'reason_type_text', key: 'reason_type_text' },
+    {
+      title: 'Action', key: 'action',
+      render: (_, r) => (
+        <Button type="link" icon={<EditOutlined />} style={{ padding: 0 }}
+          onClick={() => setEditReason({ reason_code: r.reason_code, description: r.description || '', category: r.category || '', reasonType: r.reason_type_text || '' })}>
+          Edit
+        </Button>
+      ),
+    },
   ];
+
+  const handleTogglePlant = (facility, is_active) => {
+    modal.confirm({
+      title: is_active ? 'Deactivate this plant?' : 'Activate this plant?',
+      content: is_active
+        ? `"${facility}" and all its Work Centers, Workstations, and Machines will be deactivated.`
+        : `"${facility}" will be activated. Work Centers and Workstations must be activated separately.`,
+      okText: is_active ? 'Deactivate' : 'Activate',
+      okType: is_active ? 'danger' : 'primary',
+      cancelText: 'Cancel',
+      onOk: async () => {
+        const res = await apiFetch(`/plants/`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ facility }) });
+        const data = await res.json();
+        if (res.ok) { fetchAll(); modal.success({ title: data.message }); }
+        else modal.error({ title: 'Error', content: data.error || 'Something went wrong.' });
+      },
+    });
+  };
+
+  const handleToggleWC = (work_center, is_active) => {
+    modal.confirm({
+      title: is_active ? 'Deactivate this work center?' : 'Activate this work center?',
+      content: is_active
+        ? `"${work_center}" and all its Workstations and Machines will be deactivated.`
+        : `"${work_center}" will be activated. Workstations must be activated separately.`,
+      okText: is_active ? 'Deactivate' : 'Activate',
+      okType: is_active ? 'danger' : 'primary',
+      cancelText: 'Cancel',
+      onOk: async () => {
+        const res = await apiFetch(`/work-centers/`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ work_center }) });
+        const data = await res.json();
+        if (res.ok) { fetchAll(); modal.success({ title: data.message }); }
+        else modal.error({ title: 'Error', content: data.error || 'Something went wrong.' });
+      },
+    });
+  };
+
+  const handleToggleWS = (id, name, is_active) => {
+    modal.confirm({
+      title: is_active ? 'Deactivate this workstation?' : 'Activate this workstation?',
+      content: `"${name}" will be ${is_active ? 'deactivated' : 'activated'}.`,
+      okText: is_active ? 'Deactivate' : 'Activate',
+      okType: is_active ? 'danger' : 'primary',
+      cancelText: 'Cancel',
+      onOk: async () => {
+        const res = await apiFetch(`/workstations/`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+        const data = await res.json();
+        if (res.ok) { fetchAll(); modal.success({ title: data.message }); }
+        else modal.error({ title: 'Error', content: data.error || 'Something went wrong.' });
+      },
+    });
+  };
 
   const plantColumns = [
     { title: 'Plant', dataIndex: 'facility', key: 'facility' },
-    { title: 'Action', key: 'action', render: (_, r) => <Button type="link" danger style={{ padding: 0 }} onClick={() => handleDelete('/plants/', { facility: r.facility }, `Delete plant "${r.facility}"?`)}>Delete</Button> },
+    { title: 'Action', key: 'action', render: (_, r) => (
+      <Button type="link" style={{ padding: 0, color: r.is_active ? '#ff4d4f' : '#52c41a' }}
+        onClick={() => handleTogglePlant(r.facility, r.is_active)}>
+        {r.is_active ? 'Deactivate' : 'Activate'}
+      </Button>
+    )},
   ];
 
   const wcColumns = [
     { title: 'Plant', dataIndex: 'facility', key: 'facility' },
     { title: 'Work Center', dataIndex: 'work_center', key: 'work_center' },
-    { title: 'Action', key: 'action', render: (_, r) => <Button type="link" danger style={{ padding: 0 }} onClick={() => handleDelete('/work-centers/', { work_center: r.work_center }, `Delete work center "${r.work_center}"?`)}>Delete</Button> },
+    { title: 'Action', key: 'action', render: (_, r) => (
+      <Button type="link" style={{ padding: 0, color: r.is_active ? '#ff4d4f' : '#52c41a' }}
+        onClick={() => handleToggleWC(r.work_center, r.is_active)}>
+        {r.is_active ? 'Deactivate' : 'Activate'}
+      </Button>
+    )},
   ];
 
   const wsColumns = [
     { title: 'Plant', dataIndex: 'facility_name', key: 'facility_name' },
     { title: 'Work Center', dataIndex: 'work_center_name', key: 'work_center_name' },
     { title: 'Workstation', dataIndex: 'resource_name', key: 'resource_name' },
-    { title: 'Action', key: 'action', render: (_, r) => <Button type="link" danger style={{ padding: 0 }} onClick={() => handleDelete('/workstations/', { id: r.id }, `Delete workstation "${r.resource_name}"?`)}>Delete</Button> },
+    { title: 'Action', key: 'action', render: (_, r) => (
+      <Button type="link" style={{ padding: 0, color: r.is_active ? '#ff4d4f' : '#52c41a' }}
+        onClick={() => handleToggleWS(r.id, r.resource_name, r.is_active)}>
+        {r.is_active ? 'Deactivate' : 'Activate'}
+      </Button>
+    )},
   ];
 
   return (
@@ -232,7 +322,7 @@ export default function MasterDataScreen1() {
             value={newMachine.plant || undefined}
             onChange={val => setNewMachine({ plant: val, workCentre: '', workStation: '', module: '' })}
             style={{ width: '140px' }}
-            options={plants.map(p => ({ label: p.facility, value: p.facility }))}
+            options={plants.filter(p => p.is_active).map(p => ({ label: p.facility, value: p.facility }))}
           />
           <Select
             placeholder="Work Centre"
@@ -301,7 +391,13 @@ export default function MasterDataScreen1() {
                   <Input placeholder="Plant Name" value={newPlant} onChange={e => setNewPlant(e.target.value)} style={{ width: '200px' }} />
                   <Button icon={<PlusOutlined />} onClick={handleAddPlant}>ADD</Button>
                 </div>
-                <Table size="small" pagination={{ pageSize: 5 }} dataSource={plants} rowKey="facility" columns={plantColumns} />
+                <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Switch size="small" checked={showInactivePlants} onChange={setShowInactivePlants} />
+                  <span style={{ fontSize: '13px', color: colors.textPrimary }}>Show Deactivated</span>
+                </div>
+                <style>{`.row-inactive-plant td { opacity: 0.45; }`}</style>
+                <Table size="small" pagination={{ pageSize: 5 }} dataSource={plants} rowKey="facility" columns={plantColumns}
+                  rowClassName={(r) => !r.is_active ? 'row-inactive-plant' : ''} />
               </div>
             ),
           },
@@ -316,12 +412,18 @@ export default function MasterDataScreen1() {
                     value={newWC.facility || undefined}
                     onChange={val => setNewWC({ ...newWC, facility: val })}
                     style={{ width: '160px' }}
-                    options={plants.map(p => ({ label: p.facility, value: p.facility }))}
+                    options={plants.filter(p => p.is_active).map(p => ({ label: p.facility, value: p.facility }))}
                   />
                   <Input placeholder="Work Center Name" value={newWC.work_center} onChange={e => setNewWC({ ...newWC, work_center: e.target.value })} style={{ width: '180px' }} />
                   <Button icon={<PlusOutlined />} onClick={handleAddWC}>ADD</Button>
                 </div>
-                <Table size="small" pagination={{ pageSize: 5 }} dataSource={workCenters} rowKey="work_center" columns={wcColumns} />
+                <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Switch size="small" checked={showInactiveWCs} onChange={setShowInactiveWCs} />
+                  <span style={{ fontSize: '13px', color: colors.textPrimary }}>Show Deactivated</span>
+                </div>
+                <style>{`.row-inactive-wc td { opacity: 0.45; }`}</style>
+                <Table size="small" pagination={{ pageSize: 5 }} dataSource={workCenters} rowKey="work_center" columns={wcColumns}
+                  rowClassName={(r) => !r.is_active ? 'row-inactive-wc' : ''} />
               </div>
             ),
           },
@@ -336,16 +438,48 @@ export default function MasterDataScreen1() {
                     value={newWS.work_center || undefined}
                     onChange={val => setNewWS({ ...newWS, work_center: val })}
                     style={{ width: '180px' }}
-                    options={workCenters.map(w => ({ label: `${w.facility} / ${w.work_center}`, value: w.work_center }))}
+                    options={workCenters.filter(w => w.is_active).map(w => ({ label: `${w.facility} / ${w.work_center}`, value: w.work_center }))}
                   />
                   <Input placeholder="Workstation Name" value={newWS.resource_name} onChange={e => setNewWS({ ...newWS, resource_name: e.target.value })} style={{ width: '180px' }} />
                   <Button icon={<PlusOutlined />} onClick={handleAddWS}>ADD</Button>
                 </div>
-                <Table size="small" pagination={{ pageSize: 5 }} dataSource={workstations} rowKey="id" columns={wsColumns} />
+                <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Switch size="small" checked={showInactiveWSs} onChange={setShowInactiveWSs} />
+                  <span style={{ fontSize: '13px', color: colors.textPrimary }}>Show Deactivated</span>
+                </div>
+                <style>{`.row-inactive-ws td { opacity: 0.45; }`}</style>
+                <Table size="small" pagination={{ pageSize: 5 }} dataSource={workstations} rowKey="id" columns={wsColumns}
+                  rowClassName={(r) => !r.is_active ? 'row-inactive-ws' : ''} />
               </div>
             ),
           },
         ]} />
+      </Modal>
+
+      {/* Edit Reason Code Modal */}
+      <Modal
+        title={`Edit Reason Code — ${editReason?.reason_code}`}
+        open={!!editReason}
+        onCancel={() => setEditReason(null)}
+        onOk={handleEditReason}
+        okText="Save"
+      >
+        {editReason && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '8px' }}>
+            <div>
+              <div style={{ fontSize: '12px', color: colors.textSecondary, marginBottom: '4px' }}>Description</div>
+              <Input value={editReason.description} onChange={e => setEditReason({ ...editReason, description: e.target.value })} />
+            </div>
+            <div>
+              <div style={{ fontSize: '12px', color: colors.textSecondary, marginBottom: '4px' }}>Category</div>
+              <Input value={editReason.category} onChange={e => setEditReason({ ...editReason, category: e.target.value })} />
+            </div>
+            <div>
+              <div style={{ fontSize: '12px', color: colors.textSecondary, marginBottom: '4px' }}>Reason Type</div>
+              <Input value={editReason.reasonType} onChange={e => setEditReason({ ...editReason, reasonType: e.target.value })} />
+            </div>
+          </div>
+        )}
       </Modal>
 
     </div>
