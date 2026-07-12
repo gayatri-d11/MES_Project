@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Button, Table, Select, Input, App, TimePicker, Switch } from 'antd';
-import { PlusOutlined, SaveOutlined } from '@ant-design/icons';
+import { Card, Button, Table, Select, Input, App, TimePicker, Switch, Modal } from 'antd';
+import { PlusOutlined, SaveOutlined, EditOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import colors from '../../theme/colors';
 import constants from '../../theme/constants';
@@ -50,6 +50,8 @@ export default function MasterDataScreen2() {
   const [newVariant, setNewVariant] = useState({ materialNumber: '', description: '', traceability: [] });
   const [newShift, setNewShift] = useState({ shiftName: '', shiftStart: null, shiftEnd: null, breakStart: null, breakEnd: null });
   const [newPlanning, setNewPlanning] = useState({ shift: '', workCentre: '', active: '' });
+  const [editVariant, setEditVariant] = useState(null);
+  const [editShift, setEditShift] = useState(null);
 
   const fetchProducts = () => {
     apiFetch(showInactive ? `/products/?all=true` : `/products/`).then(r => r.json()).then(d => setProducts(Array.isArray(d) ? d : []));
@@ -81,6 +83,44 @@ export default function MasterDataScreen2() {
     else modal.error({ title: 'Error', content: data.error || 'Something went wrong.' });
   };
 
+  const handleEditVariant = async () => {
+    if (!editVariant.description.trim()) { modal.error({ title: 'Error', content: 'Description is required.' }); return; }
+    if (!NAME_RE.test(editVariant.description.trim())) { modal.error({ title: 'Error', content: 'Description cannot contain special characters.' }); return; }
+    if (!editVariant.traceability || editVariant.traceability.length === 0) { modal.error({ title: 'Error', content: 'Please select at least one Traceability Level.' }); return; }
+    const res = await apiFetch(`/products/`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: editVariant.id, description: editVariant.description.trim(), traceability: editVariant.traceability }),
+    });
+    const data = await res.json();
+    if (res.ok) { fetchProducts(); setEditVariant(null); modal.success({ title: data.message }); }
+    else modal.error({ title: 'Error', content: data.error || 'Something went wrong.' });
+  };
+
+  const handleEditShift = async () => {
+    if (!editShift.shiftName.trim()) { modal.error({ title: 'Error', content: 'Shift Name is required.' }); return; }
+    if (!editShift.shiftStart || !editShift.shiftEnd) { modal.error({ title: 'Error', content: 'Shift start and end time are required.' }); return; }
+    if (!editShift.shiftEnd.isAfter(editShift.shiftStart)) { modal.error({ title: 'Invalid Timing', content: 'Shift end time must be after start time.' }); return; }
+    if (editShift.breakStart && editShift.breakEnd) {
+      if (!editShift.breakEnd.isAfter(editShift.breakStart)) { modal.error({ title: 'Invalid Timing', content: 'Break end time must be after break start time.' }); return; }
+      if (!editShift.breakStart.isAfter(editShift.shiftStart) || !editShift.breakEnd.isBefore(editShift.shiftEnd)) {
+        modal.error({ title: 'Invalid Timing', content: 'Break time must be within the shift duration.' }); return;
+      }
+    }
+    if ((editShift.breakStart && !editShift.breakEnd) || (!editShift.breakStart && editShift.breakEnd)) {
+      modal.error({ title: 'Error', content: 'Please provide both break start and end time, or leave both empty.' }); return;
+    }
+    const fmt = 'h:mm A';
+    const duration = `${editShift.shiftStart.format(fmt)} - ${editShift.shiftEnd.format(fmt)}`;
+    const break_time = editShift.breakStart ? `${editShift.breakStart.format(fmt)} - ${editShift.breakEnd.format(fmt)}` : '';
+    const res = await apiFetch(`/shifts/`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: editShift.id, shift_name: editShift.shiftName.trim(), duration, break_time }),
+    });
+    const data = await res.json();
+    if (res.ok) { fetchShifts(); setEditShift(null); modal.success({ title: data.message }); }
+    else modal.error({ title: 'Error', content: data.error || 'Something went wrong.' });
+  };
+
   const handleToggleVariant = (id, product_no, is_active) => {
     modal.confirm({
       title: is_active ? 'Deactivate this variant?' : 'Activate this variant?',
@@ -104,13 +144,18 @@ export default function MasterDataScreen2() {
     {
       title: 'Action', key: 'action',
       render: (_, r) => (
-        <Button
-          type="link"
-          style={{ padding: 0, color: r.is_active ? '#ff4d4f' : '#52c41a' }}
-          onClick={() => handleToggleVariant(r.id, r.product_no, r.is_active)}
-        >
-          {r.is_active ? 'Deactivate' : 'Activate'}
-        </Button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          {r.is_active && (
+            <Button type="link" icon={<EditOutlined />} style={{ padding: 0 }}
+              onClick={() => setEditVariant({ id: r.id, product_no: r.product_no, description: r.description || '', traceability: r.traceability ? r.traceability.split(',') : [] })}>
+              Edit
+            </Button>
+          )}
+          <Button type="link" style={{ padding: 0, color: r.is_active ? '#ff4d4f' : '#52c41a' }}
+            onClick={() => handleToggleVariant(r.id, r.product_no, r.is_active)}>
+            {r.is_active ? 'Deactivate' : 'Activate'}
+          </Button>
+        </div>
       ),
     },
   ];
@@ -165,13 +210,27 @@ export default function MasterDataScreen2() {
     {
       title: 'Action', key: 'action',
       render: (_, r) => (
-        <Button
-          type="link"
-          style={{ padding: 0, color: r.is_active ? '#ff4d4f' : '#52c41a' }}
-          onClick={() => handleToggleShift(r.id, r.shift_name, r.is_active)}
-        >
-          {r.is_active ? 'Deactivate' : 'Activate'}
-        </Button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          {r.is_active && (
+            <Button type="link" icon={<EditOutlined />} style={{ padding: 0 }}
+              onClick={() => {
+                const parseDuration = (str) => {
+                  if (!str) return { start: null, end: null };
+                  const parts = str.split(' - ');
+                  return { start: parts[0] ? dayjs(parts[0], 'h:mm A') : null, end: parts[1] ? dayjs(parts[1], 'h:mm A') : null };
+                };
+                const dur = parseDuration(r.duration);
+                const brk = parseDuration(r.break_time);
+                setEditShift({ id: r.id, shiftName: r.shift_name, shiftStart: dur.start, shiftEnd: dur.end, breakStart: brk.start, breakEnd: brk.end });
+              }}>
+              Edit
+            </Button>
+          )}
+          <Button type="link" style={{ padding: 0, color: r.is_active ? '#ff4d4f' : '#52c41a' }}
+            onClick={() => handleToggleShift(r.id, r.shift_name, r.is_active)}>
+            {r.is_active ? 'Deactivate' : 'Activate'}
+          </Button>
+        </div>
       ),
     },
   ];
@@ -342,6 +401,73 @@ export default function MasterDataScreen2() {
           rowClassName={(r) => !r.is_active ? 'row-inactive-planning' : ''}
         />
       </Card>
+
+      {/* Edit Variant Modal */}
+      <Modal
+        title={`Edit Variant — ${editVariant?.product_no}`}
+        open={!!editVariant}
+        onCancel={() => setEditVariant(null)}
+        onOk={handleEditVariant}
+        okText="Save"
+      >
+        {editVariant && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '8px' }}>
+            <div>
+              <div style={{ fontSize: '12px', color: colors.textSecondary, marginBottom: '4px' }}>Material Description</div>
+              <Input value={editVariant.description} onChange={e => setEditVariant({ ...editVariant, description: e.target.value })} />
+            </div>
+            <div>
+              <div style={{ fontSize: '12px', color: colors.textSecondary, marginBottom: '4px' }}>Traceability Level</div>
+              <Select mode="multiple" value={editVariant.traceability} onChange={val => setEditVariant({ ...editVariant, traceability: val })} style={{ width: '100%' }}>
+                <Option value="Serial">Serial</Option>
+                <Option value="Batch">Batch</Option>
+                <Option value="None">None</Option>
+              </Select>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Edit Shift Modal */}
+      <Modal
+        title={`Edit Shift — ${editShift?.shiftName}`}
+        open={!!editShift}
+        onCancel={() => setEditShift(null)}
+        onOk={handleEditShift}
+        okText="Save"
+        width={520}
+      >
+        {editShift && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '8px' }}>
+            <div>
+              <div style={{ fontSize: '12px', color: colors.textSecondary, marginBottom: '4px' }}>Shift Name</div>
+              <Input value={editShift.shiftName} onChange={e => { if (/^[a-zA-Z\s]*$/.test(e.target.value)) setEditShift({ ...editShift, shiftName: e.target.value }); }} />
+            </div>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '12px', color: colors.textSecondary, marginBottom: '4px' }}>Shift Start</div>
+                <TimePicker use12Hours format="h:mm A" value={editShift.shiftStart} onChange={val => setEditShift({ ...editShift, shiftStart: val, shiftEnd: null })} style={{ width: '100%' }} />
+              </div>
+              <span style={{ marginTop: '20px' }}>—</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '12px', color: colors.textSecondary, marginBottom: '4px' }}>Shift End</div>
+                <TimePicker use12Hours format="h:mm A" value={editShift.shiftEnd} onChange={val => setEditShift({ ...editShift, shiftEnd: val })} style={{ width: '100%' }} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '12px', color: colors.textSecondary, marginBottom: '4px' }}>Break Start (optional)</div>
+                <TimePicker use12Hours format="h:mm A" value={editShift.breakStart} onChange={val => setEditShift({ ...editShift, breakStart: val, breakEnd: null })} style={{ width: '100%' }} />
+              </div>
+              <span style={{ marginTop: '20px' }}>—</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '12px', color: colors.textSecondary, marginBottom: '4px' }}>Break End (optional)</div>
+                <TimePicker use12Hours format="h:mm A" value={editShift.breakEnd} onChange={val => setEditShift({ ...editShift, breakEnd: val })} style={{ width: '100%' }} />
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
 
     </div>
   );

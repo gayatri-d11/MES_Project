@@ -211,10 +211,28 @@ export default function MasterDataScreen1() {
     {
       title: 'Action', key: 'action',
       render: (_, r) => (
-        <Button type="link" icon={<EditOutlined />} style={{ padding: 0 }}
-          onClick={() => setEditReason({ reason_code: r.reason_code, description: r.description || '', category: r.category || '', reasonType: r.reason_type_text || '' })}>
-          Edit
-        </Button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <Button type="link" icon={<EditOutlined />} style={{ padding: 0 }}
+            onClick={() => setEditReason({ reason_code: r.reason_code, description: r.description || '', category: r.category || '', reasonType: r.reason_type_text || '' })}>
+            Edit
+          </Button>
+          <Button type="link" style={{ padding: 0, color: '#ff4d4f' }}
+            onClick={() => {
+              modal.confirm({
+                title: 'Deactivate this reason code?',
+                content: `"${r.reason_code}" will be deactivated.`,
+                okText: 'Deactivate', okType: 'danger', cancelText: 'Cancel',
+                onOk: async () => {
+                  const res = await apiFetch(`/reason-codes/`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason_code: r.reason_code }) });
+                  const data = await res.json();
+                  if (res.ok) { fetchAll(); modal.success({ title: data.message }); }
+                  else modal.error({ title: 'Error', content: data.error || 'Something went wrong.' });
+                },
+              });
+            }}>
+            Deactivate
+          </Button>
+        </div>
       ),
     },
   ];
