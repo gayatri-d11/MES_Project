@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Button, Table, Select, Input, App, TimePicker, Switch, Modal } from 'antd';
-import { PlusOutlined, SaveOutlined, EditOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import colors from '../../theme/colors';
 import constants from '../../theme/constants';
@@ -292,11 +292,10 @@ export default function MasterDataScreen2() {
       <Card style={styles.sectionCard}>
         <div style={styles.sectionHeader}>
           <span style={styles.sectionTitle}>Section 1 — Variant Definition</span>
-          <Button type="primary" icon={<SaveOutlined />}>SAVE</Button>
         </div>
         <div style={styles.inputRow}>
-          <Input placeholder="Material Number" value={newVariant.materialNumber} onChange={(e) => setNewVariant({ ...newVariant, materialNumber: e.target.value })} style={{ width: '160px' }} />
-          <Input placeholder="Material Description" value={newVariant.description} onChange={(e) => setNewVariant({ ...newVariant, description: e.target.value })} style={{ width: '180px' }} />
+          <Input placeholder="Material Number" value={newVariant.materialNumber} onChange={(e) => setNewVariant({ ...newVariant, materialNumber: e.target.value })} style={{ width: '160px' }} maxLength={50} />
+          <Input placeholder="Material Description" value={newVariant.description} onChange={(e) => setNewVariant({ ...newVariant, description: e.target.value })} style={{ width: '180px' }} maxLength={100} />
           <Select mode="multiple" placeholder="Traceability Level" value={newVariant.traceability} onChange={(val) => setNewVariant({ ...newVariant, traceability: val })} style={{ width: '220px' }}>
             <Option value="Serial">Serial</Option>
             <Option value="Batch">Batch</Option>
@@ -318,7 +317,6 @@ export default function MasterDataScreen2() {
       <Card style={styles.sectionCard}>
         <div style={styles.sectionHeader}>
           <span style={styles.sectionTitle}>Section 2 — Shift Definition</span>
-          <Button type="primary" icon={<SaveOutlined />}>SAVE</Button>
         </div>
         <div style={styles.inputRow}>
           <Input
@@ -326,6 +324,7 @@ export default function MasterDataScreen2() {
             value={newShift.shiftName}
             onChange={(e) => { if (/^[a-zA-Z\s]*$/.test(e.target.value)) setNewShift({ ...newShift, shiftName: e.target.value }); }}
             style={{ width: '160px' }}
+            maxLength={50}
           />
           <TimePicker
             placeholder="Shift Start"
@@ -376,7 +375,6 @@ export default function MasterDataScreen2() {
       <Card style={styles.sectionCard}>
         <div style={styles.sectionHeader}>
           <span style={styles.sectionTitle}>Section 3 — Shift Planning</span>
-          <Button type="primary" icon={<SaveOutlined />}>SAVE</Button>
         </div>
         <div style={styles.inputRow}>
           <Select placeholder="Shift" value={newPlanning.shift || undefined} onChange={(val) => setNewPlanning({ ...newPlanning, shift: val })} style={{ width: '180px' }}>

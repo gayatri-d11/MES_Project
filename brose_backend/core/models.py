@@ -247,7 +247,7 @@ class TblEmployee(AuditBaseModel):
     text_id = models.IntegerField(null=True, blank=True)
     last_name = models.CharField(max_length=100)
     employee_no = models.CharField(max_length=40)
-    pass_word = models.CharField(max_length=100)
+    pass_word = models.CharField(max_length=255)
     resource = models.ForeignKey(TblResource, on_delete=models.RESTRICT, db_column='resource_id')
     employee_valid_date = models.DateTimeField()
     employee_last_login_date = models.DateTimeField(null=True, blank=True)

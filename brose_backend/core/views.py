@@ -3,8 +3,8 @@ from django.db import models as django_models
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework.permissions import IsAuthenticated
 from .models import TblEmployee, TblEmployeeRole, TblRole, TblResource, TblRolePermission, TblFacility, TblWorkCenter, TblEquipment, TblResourceType, TblEquipmentType, TblReasonCode, TblReasonType, TblProduct, TblShiftDefinition, TblShiftPlanning, TblResourceLabour, TblResourceLabourDetailModuleDowntime, TblResourceLabourDetailModule, TblResourceLabourDetailWorkstation, TblProduction, TblNokProduction, TblParent, TblCustComplaint
 from .serializers import LoginSerializer, EmployeeSerializer, CreateEmployeeSerializer, RoleSerializer, PlantSerializer, WorkCenterSerializer, WorkstationSerializer, MachineSerializer, ReasonCodeSerializer, ReasonTypeSerializer, ProductSerializer, ShiftSerializer, ShiftPlanningSerializer
 from django.contrib.auth.hashers import check_password, make_password
@@ -14,9 +14,23 @@ NAME_RE = re.compile(r'^[a-zA-Z0-9\s\-_]+$')
 
 
 class LoginView(APIView):
-    permission_classes = []
+    permission_classes = [AllowAny]
 
     def post(self, request):
+        from django_ratelimit.decorators import ratelimit
+        from django_ratelimit.exceptions import Ratelimited
+        from django.test import RequestFactory
+        # Manual rate limit check
+        from django_ratelimit.core import is_ratelimited
+        limited = is_ratelimited(
+            request=request,
+            group='login',
+            key='ip',
+            rate='5/m',
+            increment=True,
+        )
+        if limited:
+            return Response({'error': 'Too many login attempts. Please wait 1 minute and try again.'}, status=status.HTTP_429_TOO_MANY_REQUESTS)
         serializer = LoginSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -59,7 +73,6 @@ class LoginView(APIView):
 
 
 class EmployeeListView(APIView):
-    permission_classes = []
 
     def get(self, request):
         employees = TblEmployee.objects.all().order_by('-is_active', 'employee_no')
@@ -96,7 +109,6 @@ class EmployeeListView(APIView):
 
 
 class RoleListView(APIView):
-    permission_classes = []
 
     def get(self, request):
         roles = TblRole.objects.all()
@@ -124,7 +136,6 @@ class RoleListView(APIView):
 
 
 class RoleDetailView(APIView):
-    permission_classes = []
 
     def patch(self, request, role_id):
         try:
@@ -170,7 +181,6 @@ class RoleDetailView(APIView):
 
 
 class EmployeeDetailView(APIView):
-    permission_classes = []
 
     def patch(self, request, employee_id):
         try:
@@ -220,7 +230,6 @@ class EmployeeDetailView(APIView):
 
 
 class PlantListView(APIView):
-    permission_classes = []
     http_method_names = ['get', 'post', 'patch', 'delete']
 
     def get(self, request):
@@ -296,7 +305,6 @@ class PlantListView(APIView):
 
 
 class WorkCenterListView(APIView):
-    permission_classes = []
     http_method_names = ['get', 'post', 'patch', 'delete']
 
     def get(self, request):
@@ -369,7 +377,6 @@ class WorkCenterListView(APIView):
 
 
 class WorkstationListView(APIView):
-    permission_classes = []
     http_method_names = ['get', 'post', 'patch', 'delete']
 
     def get(self, request):
@@ -441,7 +448,6 @@ class WorkstationListView(APIView):
 
 
 class MachineListView(APIView):
-    permission_classes = []
 
     def get(self, request):
         if request.query_params.get('all') == 'true':
@@ -499,14 +505,12 @@ class MachineListView(APIView):
 
 
 class ReasonTypeListView(APIView):
-    permission_classes = []
 
     def get(self, request):
         return Response(ReasonTypeSerializer(TblReasonType.objects.filter(is_active=True), many=True).data)
 
 
 class ReasonCodeListView(APIView):
-    permission_classes = []
     http_method_names = ['get', 'post', 'patch', 'delete']
 
     def get(self, request):
@@ -594,7 +598,6 @@ class ReasonCodeListView(APIView):
 
 
 class ShiftListView(APIView):
-    permission_classes = []
     http_method_names = ['get', 'post', 'patch', 'delete']
 
     def get(self, request):
@@ -668,7 +671,6 @@ class ShiftListView(APIView):
 
 
 class ShiftPlanningView(APIView):
-    permission_classes = []
     http_method_names = ['get', 'post', 'patch', 'delete']
 
     def get(self, request):
@@ -725,7 +727,6 @@ class ShiftPlanningView(APIView):
 
 
 class TransactionView(APIView):
-    permission_classes = []
 
     def _next_id(self, model):
         last = model.objects.order_by('-id').first()
@@ -984,7 +985,7 @@ class TransactionView(APIView):
 
 
 class ChangePasswordView(APIView):
-    permission_classes = []
+    permission_classes = [IsAuthenticated]
 
     def post(self, request):
         employee_no = None
@@ -1022,7 +1023,6 @@ class ChangePasswordView(APIView):
 
 
 class ProductionDashboardView(APIView):
-    permission_classes = []
 
     def get(self, request):
         facility = request.query_params.get('facility')
@@ -1140,7 +1140,6 @@ class ProductionDashboardView(APIView):
 
 
 class ProductListView(APIView):
-    permission_classes = []
     http_method_names = ['get', 'post', 'patch', 'delete']
 
     def get(self, request):

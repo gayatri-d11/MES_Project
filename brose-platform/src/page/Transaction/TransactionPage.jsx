@@ -111,6 +111,7 @@ function SectionTable({ title, inputFields, columns, data, onAdd, onDelete, disa
                     placeholder={field.label}
                     style={{ width: '160px' }}
                     size="small"
+                    maxLength={field.maxLength || 100}
                     value={rowInput[field.key] || ''}
                     onChange={(e) => {
                       const val = field.numeric ? e.target.value.replace(/[^0-9]/g, '') : e.target.value;
@@ -176,7 +177,7 @@ export default function TransactionPage() {
   const modules = useMemo(() => machineLayout.filter(m => m.work_center_name === selectedWorkCentre).map(m => ({ value: m.equipment, label: m.equipment })), [machineLayout, selectedWorkCentre]);
   const workStationOptions = useMemo(() => workstations.filter(w => w.work_center_name === selectedWorkCentre).map(w => ({ value: w.resource_name, label: w.resource_name })), [workstations, selectedWorkCentre]);
   const downtimeReasonCodes = useMemo(() => reasonCodes.filter(r => r.category === 'Machine Downtime').map(r => ({ value: r.reason_code, label: r.reason_code })), [reasonCodes]);
-  const nokReasonCodes = useMemo(() => reasonCodes.filter(r => r.category === 'NOK').map(r => ({ value: r.reason_code, label: r.reason_code })), [reasonCodes]);
+  const nokReasonCodes = useMemo(() => reasonCodes.filter(r => r.category === 'Scrap').map(r => ({ value: r.reason_code, label: r.reason_code })), [reasonCodes]);
   const variantOptions = useMemo(() => variants.map(v => ({ value: v.product_no, label: v.product_no })), [variants]);
 
   const addRow = (setter, existing, row) => {
@@ -343,7 +344,7 @@ export default function TransactionPage() {
               inputFields={[
                 { label: 'Work Station', key: 'workStation', type: 'select', options: workStationOptions },
                 { label: 'Resource Count', key: 'resourceCount', type: 'input', numeric: true },
-                { label: 'Resource Names', key: 'resourceNames', type: 'input', required: false },
+                { label: 'Resource Names', key: 'resourceNames', type: 'input', required: false, maxLength: 200 },
               ]}
             />
           </Panel>

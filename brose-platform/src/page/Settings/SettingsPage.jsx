@@ -353,6 +353,7 @@ const handleToggleStatus = (record) => {
               value={newEmployee.last_name}
               onChange={(e) => setNewEmployee({ ...newEmployee, last_name: e.target.value })}
               style={{ width: '160px' }}
+              maxLength={100}
             />
             <Input.Password
               placeholder="Password"
@@ -398,6 +399,7 @@ const handleToggleStatus = (record) => {
               value={newRole.role_name}
               onChange={(e) => setNewRole({ ...newRole, role_name: e.target.value })}
               style={{ width: '180px' }}
+              maxLength={50}
             />
             <Select
               mode="multiple"
@@ -423,9 +425,29 @@ const handleToggleStatus = (record) => {
       key: '3',
       label: 'App Configuration',
       children: (
-        <div style={{ color: colors.textSecondary, fontFamily: constants.fontFamily }}>
-          App configuration settings will appear here.
-        </div>
+        <Descriptions column={1} bordered size="small" style={{ maxWidth: '480px' }}>
+          <Descriptions.Item label="Platform">
+            <span style={{ fontFamily: constants.fontFamily }}>Brose Plant Digitalization Platform</span>
+          </Descriptions.Item>
+          <Descriptions.Item label="Backend">
+            <span style={{ fontFamily: constants.fontFamily }}>Django 4.2 — REST API</span>
+          </Descriptions.Item>
+          <Descriptions.Item label="Frontend">
+            <span style={{ fontFamily: constants.fontFamily }}>React 18 — Vite — Ant Design</span>
+          </Descriptions.Item>
+          <Descriptions.Item label="Database">
+            <span style={{ fontFamily: constants.fontFamily }}>PostgreSQL 14+</span>
+          </Descriptions.Item>
+          <Descriptions.Item label="Authentication">
+            <span style={{ fontFamily: constants.fontFamily }}>JWT — Access token lifetime: 8 hours</span>
+          </Descriptions.Item>
+          <Descriptions.Item label="API Base URL">
+            <span style={{ fontFamily: constants.fontFamily }}>http://localhost:8000/api</span>
+          </Descriptions.Item>
+          <Descriptions.Item label="Frontend URL">
+            <span style={{ fontFamily: constants.fontFamily }}>http://localhost:5173</span>
+          </Descriptions.Item>
+        </Descriptions>
       ),
     },
     {

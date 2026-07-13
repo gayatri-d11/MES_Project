@@ -360,6 +360,7 @@ export default function MasterDataScreen1() {
             value={newMachine.module}
             onChange={e => setNewMachine({ ...newMachine, module: e.target.value })}
             style={{ width: '140px' }}
+            maxLength={50}
           />
           <Button icon={<PlusOutlined />} onClick={handleAddMachine}>ADD</Button>
         </div>
@@ -379,8 +380,8 @@ export default function MasterDataScreen1() {
           <span style={styles.sectionTitle}>Section 2 — Reason Code Definition</span>
         </div>
         <div style={styles.inputRow}>
-          <Input placeholder="Reason Code" value={newReason.reasonCode} onChange={e => setNewReason({ ...newReason, reasonCode: e.target.value })} style={{ width: '130px' }} />
-          <Input placeholder="Description" value={newReason.description} onChange={e => setNewReason({ ...newReason, description: e.target.value })} style={{ width: '180px' }} />
+          <Input placeholder="Reason Code" value={newReason.reasonCode} onChange={e => setNewReason({ ...newReason, reasonCode: e.target.value })} style={{ width: '130px' }} maxLength={20} />
+          <Input placeholder="Description" value={newReason.description} onChange={e => setNewReason({ ...newReason, description: e.target.value })} style={{ width: '180px' }} maxLength={100} />
           <Select
             placeholder="Category"
             value={newReason.category || undefined}
@@ -419,7 +420,7 @@ export default function MasterDataScreen1() {
             children: (
               <div>
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
-                  <Input placeholder="Plant Name" value={newPlant} onChange={e => setNewPlant(e.target.value)} style={{ width: '200px' }} />
+                  <Input placeholder="Plant Name" value={newPlant} onChange={e => setNewPlant(e.target.value)} style={{ width: '200px' }} maxLength={50} />
                   <Button icon={<PlusOutlined />} onClick={handleAddPlant}>ADD</Button>
                 </div>
                 <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -445,7 +446,7 @@ export default function MasterDataScreen1() {
                     style={{ width: '160px' }}
                     options={plants.filter(p => p.is_active).map(p => ({ label: p.facility, value: p.facility }))}
                   />
-                  <Input placeholder="Work Center Name" value={newWC.work_center} onChange={e => setNewWC({ ...newWC, work_center: e.target.value })} style={{ width: '180px' }} />
+                  <Input placeholder="Work Center Name" value={newWC.work_center} onChange={e => setNewWC({ ...newWC, work_center: e.target.value })} style={{ width: '180px' }} maxLength={50} />
                   <Button icon={<PlusOutlined />} onClick={handleAddWC}>ADD</Button>
                 </div>
                 <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -471,7 +472,7 @@ export default function MasterDataScreen1() {
                     style={{ width: '180px' }}
                     options={workCenters.filter(w => w.is_active).map(w => ({ label: `${w.facility} / ${w.work_center}`, value: w.work_center }))}
                   />
-                  <Input placeholder="Workstation Name" value={newWS.resource_name} onChange={e => setNewWS({ ...newWS, resource_name: e.target.value })} style={{ width: '180px' }} />
+                  <Input placeholder="Workstation Name" value={newWS.resource_name} onChange={e => setNewWS({ ...newWS, resource_name: e.target.value })} style={{ width: '180px' }} maxLength={50} />
                   <Button icon={<PlusOutlined />} onClick={handleAddWS}>ADD</Button>
                 </div>
                 <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
