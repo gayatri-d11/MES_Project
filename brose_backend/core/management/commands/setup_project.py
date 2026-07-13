@@ -91,12 +91,22 @@ class Command(BaseCommand):
                 defaults={'reason_type': rt_name, 'reason_category': rt_cat, 'text_id': rt_id, 'is_active': True, 'rowversion_stamp': 1, 'created_on': now, 'modified_on': now},
             )
 
-        # 8. Reason Codes (sample — users can add more)
+        # 8. Reason Codes (standard Brose reason codes — fixed, do not change)
         reason_codes = [
-            ('MD-001',  'Conveyor Belt Failure',        'Machine Downtime', 'TT: Technical Downtime',         1011),
-            ('MD-002',  'Sensor Malfunction',           'Machine Downtime', 'TT: Technical Downtime',         1011),
-            ('NOK-001', 'Dimensional Out of Tolerance', 'Scrap',            'Machine Failure',                30),
-            ('NOK-002', 'Surface Defect',               'Scrap',            'Operator',                       1001),
+            ('TO',  'TO: Organizational Downtime',    'Machine Downtime', 'TO: Organizational Downtime',    1010),
+            ('TT',  'TT: Technical Downtime',         'Machine Downtime', 'TT: Technical Downtime',         1011),
+            ('TNB', 'TNB: Non Occupation Time',        'Machine Downtime', 'TNB: Non Occupation Time',       1012),
+            ('TR',  'TR: Change Overtime',             'Machine Downtime', 'TR: Change Overtime',            1013),
+            ('TW',  'TW: Maintenance Cause Downtime',  'Machine Downtime', 'TW: Maintenance Cause Downtime', 1014),
+            ('TA',  'TA: Short-term Lack of Job',      'Machine Downtime', 'TA: Short-term Lack of Job',     1015),
+            ('TN',  'TN: Utilization Time (Running)',  'Machine Downtime', 'TN: Utilization Time (Running)', 1016),
+            ('TP',  'TP: Performance Downtime',        'Machine Downtime', 'TP: Performance Downtime',       1017),
+            ('TB',  'TB: Utilization Time',            'Machine Downtime', 'TB: Utilization Time',           1018),
+            ('PD',    'Planned Downtime',   'Machine Downtime', 'Planned Downtime',   23),
+            ('UD',    'Unplanned Downtime',  'Machine Downtime', 'Unplanned Downtime', 24),
+            ('SC-OP', 'Operator',            'Scrap',            'Operator',           1001),
+            ('SC-MAT','Material',            'Scrap',            'Material',           1002),
+            ('SC-MF', 'Machine Failure',     'Scrap',            'Machine Failure',    30),
         ]
         for rc, desc, cat, rt_text, rt_id in reason_codes:
             TblReasonCode.objects.get_or_create(
