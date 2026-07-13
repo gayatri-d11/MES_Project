@@ -79,7 +79,7 @@ npm run dev
 Backend: `http://localhost:8000`
 Frontend: `http://localhost:5173`
 
-Default admin login — Employee No: `BR-00000001` / Password: `Admin@123`
+Default admin login — Employee No: `BR-00000001` / Password: set during `setup_project`
 
 ---
 

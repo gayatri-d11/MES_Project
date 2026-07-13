@@ -17,20 +17,6 @@ class LoginView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        from django_ratelimit.decorators import ratelimit
-        from django_ratelimit.exceptions import Ratelimited
-        from django.test import RequestFactory
-        # Manual rate limit check
-        from django_ratelimit.core import is_ratelimited
-        limited = is_ratelimited(
-            request=request,
-            group='login',
-            key='ip',
-            rate='5/m',
-            increment=True,
-        )
-        if limited:
-            return Response({'error': 'Too many login attempts. Please wait 1 minute and try again.'}, status=status.HTTP_429_TOO_MANY_REQUESTS)
         serializer = LoginSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

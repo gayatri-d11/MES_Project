@@ -1,4 +1,4 @@
-const API = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
 
 export function getAuthHeaders() {
   const token = localStorage.getItem('access_token');
@@ -15,7 +15,7 @@ export async function apiFetch(path, options = {}) {
     ...(options.headers || {}),
   };
 
-  const res = await fetch(`${API}${path}`, { ...options, headers });
+  const res = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
 
   if (res.status === 401) {
     localStorage.removeItem('access_token');

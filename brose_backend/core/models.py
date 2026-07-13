@@ -243,6 +243,8 @@ class TblEquipment(AuditBaseModel):
 # 17. EMPLOYEE
 # ==========================================
 class TblEmployee(AuditBaseModel):
+    is_authenticated = True
+
     id = models.IntegerField(primary_key=True)
     text_id = models.IntegerField(null=True, blank=True)
     last_name = models.CharField(max_length=100)

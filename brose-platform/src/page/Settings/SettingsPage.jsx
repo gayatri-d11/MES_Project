@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Tabs, Card, Table, Button, Tag, Input, Select, Modal, App, Form, Divider, Descriptions } from 'antd';
-import { PlusOutlined, SearchOutlined, UserOutlined, LockOutlined } from '@ant-design/icons';
+import { Tabs, Card, Table, Button, Tag, Input, Select, Modal, App, Descriptions } from 'antd';
+import { PlusOutlined, SearchOutlined } from '@ant-design/icons';
 import colors from '../../theme/colors';
 import constants from '../../theme/constants';
 import apiFetch from '../../utils/apiFetch';
-import { useAuth } from '../../context/AuthContext';
 
 const styles = {
   card: {
@@ -27,7 +26,6 @@ const styles = {
 
 export default function SettingsPage() {
   const { modal } = App.useApp();
-  const { user } = useAuth();
   const [employees, setEmployees] = useState([]);
   const [roles, setRoles] = useState([]);
   const [newEmployee, setNewEmployee] = useState({ employeeId: '', last_name: '', password: '', role_ids: [] });
@@ -37,8 +35,6 @@ export default function SettingsPage() {
   const [newRole, setNewRole] = useState({ role_name: '', pages: [] });
   const [editRole, setEditRole] = useState(null);
   const [editRoleModalOpen, setEditRoleModalOpen] = useState(false);
-  const [pwForm, setPwForm] = useState({ current: '', newPw: '', confirm: '' });
-  const [pwLoading, setPwLoading] = useState(false);
   const PAGE_OPTIONS = [
     { label: 'Dashboard', value: 'dashboard' },
     { label: 'Master Data', value: 'master_data' },
@@ -296,28 +292,6 @@ const handleToggleStatus = (record) => {
     },
   ];
 
-  const handleChangePassword = async () => {
-    if (!pwForm.current) { modal.error({ title: 'Error', content: 'Current password is required.' }); return; }
-    if (!pwForm.newPw) { modal.error({ title: 'Error', content: 'New password is required.' }); return; }
-    if (pwForm.newPw.length < 8) { modal.error({ title: 'Error', content: 'New password must be at least 8 characters.' }); return; }
-    if (!/[A-Z]/.test(pwForm.newPw)) { modal.error({ title: 'Error', content: 'New password must contain at least 1 uppercase letter.' }); return; }
-    if (!/[0-9]/.test(pwForm.newPw)) { modal.error({ title: 'Error', content: 'New password must contain at least 1 number.' }); return; }
-    if (pwForm.newPw !== pwForm.confirm) { modal.error({ title: 'Error', content: 'New password and confirm password do not match.' }); return; }
-    setPwLoading(true);
-    try {
-      const res = await apiFetch('/change-password/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ current_password: pwForm.current, new_password: pwForm.newPw }),
-      });
-      const data = await res.json();
-      if (res.ok) { modal.success({ title: data.message }); setPwForm({ current: '', newPw: '', confirm: '' }); }
-      else modal.error({ title: 'Error', content: data.error || 'Failed to change password.' });
-    } finally {
-      setPwLoading(false);
-    }
-  };
-
   const tabItems = [
     {
       key: '1',
@@ -425,86 +399,18 @@ const handleToggleStatus = (record) => {
       key: '3',
       label: 'App Configuration',
       children: (
-        <Descriptions column={1} bordered size="small" style={{ maxWidth: '480px' }}>
-          <Descriptions.Item label="Platform">
-            <span style={{ fontFamily: constants.fontFamily }}>Brose Plant Digitalization Platform</span>
-          </Descriptions.Item>
-          <Descriptions.Item label="Backend">
-            <span style={{ fontFamily: constants.fontFamily }}>Django 4.2 — REST API</span>
-          </Descriptions.Item>
-          <Descriptions.Item label="Frontend">
-            <span style={{ fontFamily: constants.fontFamily }}>React 18 — Vite — Ant Design</span>
-          </Descriptions.Item>
-          <Descriptions.Item label="Database">
-            <span style={{ fontFamily: constants.fontFamily }}>PostgreSQL 14+</span>
-          </Descriptions.Item>
-          <Descriptions.Item label="Authentication">
-            <span style={{ fontFamily: constants.fontFamily }}>JWT — Access token lifetime: 8 hours</span>
-          </Descriptions.Item>
-          <Descriptions.Item label="API Base URL">
-            <span style={{ fontFamily: constants.fontFamily }}>http://localhost:8000/api</span>
-          </Descriptions.Item>
-          <Descriptions.Item label="Frontend URL">
-            <span style={{ fontFamily: constants.fontFamily }}>http://localhost:5173</span>
-          </Descriptions.Item>
-        </Descriptions>
-      ),
-    },
-    {
-      key: '4',
-      label: 'My Profile',
-      children: (
-        <div style={{ maxWidth: '480px' }}>
+        <div style={{ maxWidth: '520px' }}>
           <Descriptions column={1} bordered size="small" style={{ marginBottom: constants.spacing.lg }}>
-            <Descriptions.Item label={<span style={{ fontFamily: constants.fontFamily }}><UserOutlined /> Employee ID</span>}>
-              <span style={{ fontFamily: constants.fontFamily, fontWeight: '600' }}>{user?.employeeId}</span>
+            <Descriptions.Item label="Total Employees">{employees.length}</Descriptions.Item>
+            <Descriptions.Item label="Active Employees">{employees.filter(e => e.is_active).length}</Descriptions.Item>
+            <Descriptions.Item label="Inactive Employees">{employees.filter(e => !e.is_active).length}</Descriptions.Item>
+            <Descriptions.Item label="Total Roles">{roles.length}</Descriptions.Item>
+            <Descriptions.Item label="Role Names">
+              {roles.map(r => <Tag key={r.id} color="blue">{r.role_name}</Tag>)}
             </Descriptions.Item>
-            <Descriptions.Item label={<span style={{ fontFamily: constants.fontFamily }}>Role(s)</span>}>
-              {(user?.roles || []).map(r => <Tag key={r} color="blue">{r}</Tag>)}
-            </Descriptions.Item>
-            <Descriptions.Item label={<span style={{ fontFamily: constants.fontFamily }}>Access Pages</span>}>
-              {(user?.pages || []).map(p => <Tag key={p}>{PAGE_OPTIONS.find(o => o.value === p)?.label || p}</Tag>)}
-            </Descriptions.Item>
+            <Descriptions.Item label="Session Token Lifetime">8 hours (auto logout on expiry)</Descriptions.Item>
+            <Descriptions.Item label="Support Contact">brose-digitalization@brose.com</Descriptions.Item>
           </Descriptions>
-
-          <Divider orientation="left" style={{ fontFamily: constants.fontFamily, fontSize: '13px' }}>
-            <LockOutlined /> Change Password
-          </Divider>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: constants.spacing.md }}>
-            <div>
-              <div style={{ fontSize: '12px', color: colors.textSecondary, marginBottom: 4, fontFamily: constants.fontFamily }}>Current Password</div>
-              <Input.Password
-                value={pwForm.current}
-                onChange={e => setPwForm({ ...pwForm, current: e.target.value })}
-                style={{ width: '100%' }}
-              />
-            </div>
-            <div>
-              <div style={{ fontSize: '12px', color: colors.textSecondary, marginBottom: 4, fontFamily: constants.fontFamily }}>New Password</div>
-              <Input.Password
-                value={pwForm.newPw}
-                onChange={e => setPwForm({ ...pwForm, newPw: e.target.value })}
-                style={{ width: '100%' }}
-              />
-            </div>
-            <div>
-              <div style={{ fontSize: '12px', color: colors.textSecondary, marginBottom: 4, fontFamily: constants.fontFamily }}>Confirm New Password</div>
-              <Input.Password
-                value={pwForm.confirm}
-                onChange={e => setPwForm({ ...pwForm, confirm: e.target.value })}
-                style={{ width: '100%' }}
-              />
-            </div>
-            <Button
-              type="primary"
-              loading={pwLoading}
-              onClick={handleChangePassword}
-              style={{ width: 'fit-content' }}
-            >
-              Update Password
-            </Button>
-          </div>
         </div>
       ),
     },
