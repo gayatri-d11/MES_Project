@@ -112,7 +112,11 @@ function SectionTable({ title, inputFields, columns, data, onAdd, onDelete, disa
                     style={{ width: '160px' }}
                     size="small"
                     value={rowInput[field.key] || ''}
-                    onChange={(e) => { setRowInput({ ...rowInput, [field.key]: e.target.value }); setError(''); }}
+                    onChange={(e) => {
+                      const val = field.numeric ? e.target.value.replace(/[^0-9]/g, '') : e.target.value;
+                      setRowInput({ ...rowInput, [field.key]: val });
+                      setError('');
+                    }}
                   />
                 )}
               </div>
@@ -314,7 +318,7 @@ export default function TransactionPage() {
               inputFields={[
                 { label: 'Module', key: 'module', type: 'select', options: modules },
                 { label: 'Reason Code', key: 'reasonCode', type: 'select', options: downtimeReasonCodes },
-                { label: 'Duration (min)', key: 'duration', type: 'input' },
+                { label: 'Duration (min)', key: 'duration', type: 'input', numeric: true },
               ]}
             />
             <SectionTable
@@ -326,7 +330,7 @@ export default function TransactionPage() {
               onDelete={(key) => deleteRow(setTargetCycleData, targetCycleData, key)}
               inputFields={[
                 { label: 'Module', key: 'module', type: 'select', options: modules },
-                { label: 'Target Cycle Time (Seconds)', key: 'targetCycle', type: 'input' },
+                { label: 'Target Cycle Time (Seconds)', key: 'targetCycle', type: 'input', numeric: true },
               ]}
             />
             <SectionTable
@@ -338,7 +342,7 @@ export default function TransactionPage() {
               onDelete={(key) => deleteRow(setResourceData, resourceData, key)}
               inputFields={[
                 { label: 'Work Station', key: 'workStation', type: 'select', options: workStationOptions },
-                { label: 'Resource Count', key: 'resourceCount', type: 'input' },
+                { label: 'Resource Count', key: 'resourceCount', type: 'input', numeric: true },
                 { label: 'Resource Names', key: 'resourceNames', type: 'input', required: false },
               ]}
             />
@@ -354,8 +358,8 @@ export default function TransactionPage() {
               onDelete={(key) => deleteRow(setProductionData, productionData, key)}
               inputFields={[
                 { label: 'Variant Type', key: 'variantType', type: 'select', options: variantOptions },
-                { label: 'OK Count', key: 'okCount', type: 'input' },
-                { label: 'NOK Count', key: 'nokCount', type: 'input', required: false },
+                { label: 'OK Count', key: 'okCount', type: 'input', numeric: true },
+                { label: 'NOK Count', key: 'nokCount', type: 'input', required: false, numeric: true },
                 { label: 'NOK Type', key: 'nokType', type: 'select', options: [{ value: 'Scrap', label: 'Scrap' }, { value: 'Rework', label: 'Rework' }, { value: 'Retest', label: 'Retest' }], required: false },
                 { label: 'NOK Reason Code', key: 'nokReasonCode', type: 'select', options: nokReasonCodes, required: false },
               ]}

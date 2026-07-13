@@ -522,6 +522,7 @@ class ReasonCodeListView(APIView):
         description = request.data.get('description', '').strip()
         category = request.data.get('category', '').strip()
         reason_type_text = request.data.get('reason_type_text', '').strip()
+        reason_type_id = request.data.get('reason_type_id')
         if not description:
             return Response({'error': 'Description is required.'}, status=status.HTTP_400_BAD_REQUEST)
         if not category:
@@ -531,6 +532,11 @@ class ReasonCodeListView(APIView):
         rc.description = description
         rc.category = category
         rc.reason_type_text = reason_type_text
+        if reason_type_id:
+            try:
+                rc.reason_type = TblReasonType.objects.get(id=reason_type_id)
+            except TblReasonType.DoesNotExist:
+                pass
         rc.save()
         return Response({'message': 'Reason Code updated successfully.'})
 

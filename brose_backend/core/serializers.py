@@ -39,7 +39,7 @@ class ReasonTypeSerializer(serializers.ModelSerializer):
 class ReasonCodeSerializer(serializers.ModelSerializer):
     class Meta:
         model = TblReasonCode
-        fields = ['reason_code', 'description', 'category', 'reason_type_text']
+        fields = ['reason_code', 'description', 'category', 'reason_type_text', 'reason_type_id']
 
 class PlantSerializer(serializers.ModelSerializer):
     class Meta:

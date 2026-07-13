@@ -48,7 +48,7 @@ export default function MasterDataScreen1() {
   const [reasonTypes, setReasonTypes] = useState([]);
 
   const [newMachine, setNewMachine] = useState({ plant: '', workCentre: '', workStation: '', module: '' });
-  const [newReason, setNewReason] = useState({ reasonCode: '', description: '', category: '', reasonType: '' });
+  const [newReason, setNewReason] = useState({ reasonCode: '', description: '', category: '', reasonTypeId: null, reasonTypeText: '' });
 
   const [manageOpen, setManageOpen] = useState(false);
   const [newPlant, setNewPlant] = useState('');
@@ -125,33 +125,30 @@ export default function MasterDataScreen1() {
     if (!newReason.reasonCode.trim()) { modal.error({ title: 'Error', content: 'Reason Code is required.' }); return; }
     if (!/^[a-zA-Z0-9\-_]+$/.test(newReason.reasonCode.trim())) { modal.error({ title: 'Error', content: 'Reason Code can only contain letters, numbers, hyphens and underscores.' }); return; }
     if (!newReason.description.trim()) { modal.error({ title: 'Error', content: 'Description is required.' }); return; }
-    if (!/^[a-zA-Z0-9\s\-_]+$/.test(newReason.description.trim())) { modal.error({ title: 'Error', content: 'Description cannot contain special characters.' }); return; }
-    if (!newReason.category.trim()) { modal.error({ title: 'Error', content: 'Category is required.' }); return; }
-    if (!/^[a-zA-Z0-9\s\-_]+$/.test(newReason.category.trim())) { modal.error({ title: 'Error', content: 'Category cannot contain special characters.' }); return; }
-    if (!newReason.reasonType.trim()) { modal.error({ title: 'Error', content: 'Reason Type is required.' }); return; }
-    if (!/^[a-zA-Z0-9\s\-_:]+$/.test(newReason.reasonType.trim())) { modal.error({ title: 'Error', content: 'Reason Type cannot contain special characters.' }); return; }
-    const selectedType = reasonTypes.find(rt => rt.reason_type === newReason.reasonType.trim());
+    if (!newReason.category) { modal.error({ title: 'Error', content: 'Category is required.' }); return; }
+    if (!newReason.reasonTypeId) { modal.error({ title: 'Error', content: 'Reason Type is required.' }); return; }
     const res = await apiFetch(`/reason-codes/`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         reason_code: newReason.reasonCode.trim(),
         description: newReason.description.trim(),
-        category: newReason.category.trim(),
-        reason_type_text: newReason.reasonType.trim(),
+        category: newReason.category,
+        reason_type_text: newReason.reasonTypeText,
+        reason_type_id: newReason.reasonTypeId,
       }),
     });
     const data = await res.json();
-    if (res.ok) { fetchAll(); setNewReason({ reasonCode: '', description: '', category: '', reasonType: '' }); modal.success({ title: data.message }); }
+    if (res.ok) { fetchAll(); setNewReason({ reasonCode: '', description: '', category: '', reasonTypeId: null, reasonTypeText: '' }); modal.success({ title: data.message }); }
     else modal.error({ title: 'Error', content: data.error || 'Something went wrong.' });
   };
 
   const handleEditReason = async () => {
     if (!editReason.description.trim()) { modal.error({ title: 'Error', content: 'Description is required.' }); return; }
-    if (!editReason.category.trim()) { modal.error({ title: 'Error', content: 'Category is required.' }); return; }
-    if (!editReason.reasonType.trim()) { modal.error({ title: 'Error', content: 'Reason Type is required.' }); return; }
+    if (!editReason.category) { modal.error({ title: 'Error', content: 'Category is required.' }); return; }
+    if (!editReason.reasonTypeId) { modal.error({ title: 'Error', content: 'Reason Type is required.' }); return; }
     const res = await apiFetch(`/reason-codes/`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason_code: editReason.reason_code, description: editReason.description.trim(), category: editReason.category.trim(), reason_type_text: editReason.reasonType.trim() }),
+      body: JSON.stringify({ reason_code: editReason.reason_code, description: editReason.description.trim(), category: editReason.category, reason_type_text: editReason.reasonTypeText, reason_type_id: editReason.reasonTypeId }),
     });
     const data = await res.json();
     if (res.ok) { fetchAll(); setEditReason(null); modal.success({ title: data.message }); }
@@ -213,7 +210,7 @@ export default function MasterDataScreen1() {
       render: (_, r) => (
         <div style={{ display: 'flex', gap: '8px' }}>
           <Button type="link" icon={<EditOutlined />} style={{ padding: 0 }}
-            onClick={() => setEditReason({ reason_code: r.reason_code, description: r.description || '', category: r.category || '', reasonType: r.reason_type_text || '' })}>
+            onClick={() => setEditReason({ reason_code: r.reason_code, description: r.description || '', category: r.category || '', reasonTypeId: r.reason_type_id || null, reasonTypeText: r.reason_type_text || '' })}>
             Edit
           </Button>
           <Button type="link" style={{ padding: 0, color: '#ff4d4f' }}
@@ -383,9 +380,25 @@ export default function MasterDataScreen1() {
         </div>
         <div style={styles.inputRow}>
           <Input placeholder="Reason Code" value={newReason.reasonCode} onChange={e => setNewReason({ ...newReason, reasonCode: e.target.value })} style={{ width: '130px' }} />
-          <Input placeholder="Description" value={newReason.description} onChange={e => setNewReason({ ...newReason, description: e.target.value })} style={{ width: '160px' }} />
-          <Input placeholder="Category" value={newReason.category} onChange={e => setNewReason({ ...newReason, category: e.target.value })} style={{ width: '150px' }} />
-          <Input placeholder="Reason Type" value={newReason.reasonType} onChange={e => setNewReason({ ...newReason, reasonType: e.target.value })} style={{ width: '200px' }} />
+          <Input placeholder="Description" value={newReason.description} onChange={e => setNewReason({ ...newReason, description: e.target.value })} style={{ width: '180px' }} />
+          <Select
+            placeholder="Category"
+            value={newReason.category || undefined}
+            onChange={val => setNewReason({ ...newReason, category: val, reasonTypeId: null, reasonTypeText: '' })}
+            style={{ width: '160px' }}
+            options={[
+              { label: 'Machine Downtime', value: 'Machine Downtime' },
+              { label: 'Scrap', value: 'Scrap' },
+            ]}
+          />
+          <Select
+            placeholder="Reason Type"
+            value={newReason.reasonTypeId || undefined}
+            onChange={(val, opt) => setNewReason({ ...newReason, reasonTypeId: val, reasonTypeText: opt.label })}
+            style={{ width: '260px' }}
+            disabled={!newReason.category}
+            options={reasonTypes.filter(rt => rt.reason_category === newReason.category).map(rt => ({ label: rt.reason_type, value: rt.id }))}
+          />
           <Button icon={<PlusOutlined />} onClick={handleAddReason}>ADD</Button>
         </div>
         <Table columns={reasonColumns} dataSource={reasonCodes} rowKey="reason_code" pagination={{ pageSize: 10, showTotal: (total) => `Total ${total} items` }} size="small" />
@@ -490,11 +503,25 @@ export default function MasterDataScreen1() {
             </div>
             <div>
               <div style={{ fontSize: '12px', color: colors.textSecondary, marginBottom: '4px' }}>Category</div>
-              <Input value={editReason.category} onChange={e => setEditReason({ ...editReason, category: e.target.value })} />
+              <Select
+                value={editReason.category || undefined}
+                onChange={val => setEditReason({ ...editReason, category: val, reasonTypeId: null, reasonTypeText: '' })}
+                style={{ width: '100%' }}
+                options={[
+                  { label: 'Machine Downtime', value: 'Machine Downtime' },
+                  { label: 'Scrap', value: 'Scrap' },
+                ]}
+              />
             </div>
             <div>
               <div style={{ fontSize: '12px', color: colors.textSecondary, marginBottom: '4px' }}>Reason Type</div>
-              <Input value={editReason.reasonType} onChange={e => setEditReason({ ...editReason, reasonType: e.target.value })} />
+              <Select
+                value={editReason.reasonTypeId || undefined}
+                onChange={(val, opt) => setEditReason({ ...editReason, reasonTypeId: val, reasonTypeText: opt.label })}
+                style={{ width: '100%' }}
+                disabled={!editReason.category}
+                options={reasonTypes.filter(rt => rt.reason_category === editReason.category).map(rt => ({ label: rt.reason_type, value: rt.id }))}
+              />
             </div>
           </div>
         )}

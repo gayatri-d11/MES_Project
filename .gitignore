@@ -2,7 +2,7 @@
 *.zip
 
 # Chat exports
-*.md
+conversation*.md
 
 # OS
 .DS_Store
