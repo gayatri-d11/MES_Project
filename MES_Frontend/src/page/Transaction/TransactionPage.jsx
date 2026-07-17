@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Card, Form, Select, Input, Button, Collapse, Table, App, DatePicker, Typography } from 'antd';
+import { Card, Form, Select, Input, Button, Collapse, Table, App, DatePicker, Typography, Modal } from 'antd';
 import { PlusOutlined, EditOutlined, SaveOutlined, DeleteOutlined, CalculatorOutlined } from '@ant-design/icons';
 import colors from '../../theme/colors';
 import constants from '../../theme/constants';
 import apiFetch from '../../utils/apiFetch';
+import { useTransaction } from '../../context/TransactionContext';
 
 const { Option } = Select;
 const { Panel } = Collapse;
@@ -57,7 +58,41 @@ function SectionTable({ title, inputFields, columns, data, onAdd, onDelete, onSa
   const [rowInput, setRowInput] = useState({});
   const [error, setError] = useState('');
 
-  // Sync local read-only when global read-only changes (e.g. after SHOW loads data)
+  const handleSave = () => {
+    const hasUnsavedInput = inputFields.some(f => rowInput[f.key] !== undefined && rowInput[f.key] !== '');
+    if (hasUnsavedInput) {
+      Modal.confirm({
+        title: 'Unsaved Row',
+        content: 'You have a row that has not been added yet. Do you want to add it before saving?',
+        okText: 'Add & Save',
+        cancelText: 'Discard & Save',
+        onOk: () => {
+          const missing = inputFields.filter(f => {
+            if (f.required === false) return false;
+            if (f.conditionalOn) {
+              const depVal = rowInput[f.conditionalOn.key];
+              if (!depVal || Number(depVal) === 0) return false;
+            }
+            return !rowInput[f.key];
+          });
+          if (missing.length > 0) {
+            setError(`Please fill in: ${missing.map(f => f.label).join(', ')}`);
+            return Promise.reject();
+          }
+          setError('');
+          if (onAdd) onAdd(rowInput);
+          setRowInput({});
+          onSave && onSave();
+          setLocalReadOnly(true);
+        },
+        onCancel: () => { setRowInput({}); setError(''); onSave && onSave(); setLocalReadOnly(true); },
+      });
+    } else {
+      onSave && onSave();
+      setLocalReadOnly(true);
+    }
+  };
+
   useEffect(() => { setLocalReadOnly(true); }, [globalReadOnly]);
 
   const isReadOnly = globalReadOnly || localReadOnly;
@@ -95,7 +130,7 @@ function SectionTable({ title, inputFields, columns, data, onAdd, onDelete, onSa
             {localReadOnly ? (
               <Button size="small" icon={<EditOutlined />} onClick={() => setLocalReadOnly(false)}>EDIT</Button>
             ) : (
-              <Button size="small" type="primary" icon={<SaveOutlined />} onClick={() => { onSave && onSave(); setLocalReadOnly(true); }}>SAVE</Button>
+              <Button size="small" type="primary" icon={<SaveOutlined />} onClick={handleSave}>SAVE</Button>
             )}
           </div>
         )}
@@ -127,13 +162,11 @@ function SectionTable({ title, inputFields, columns, data, onAdd, onDelete, onSa
                     optionLabelProp="label"
                     onChange={(val) => {
                       const next = { ...rowInput, [field.key]: val };
-                      // Reverse-link: if nokReasonCode changes, auto-set nokType
                       if (field.key === 'nokReasonCode') {
                         const map = { 'nok-sc': 'Scrap', 'nok-rw': 'Rework', 'nok-rt': 'Retest' };
                         const mapped = map[val?.toLowerCase()];
                         if (mapped) next.nokType = mapped;
                       }
-                      // Forward-link: if nokType changes, clear nokReasonCode
                       if (field.key === 'nokType') next.nokReasonCode = undefined;
                       setRowInput(next); setError('');
                     }}
@@ -182,8 +215,21 @@ export default function TransactionPage() {
   const authHeaders = { 'Content-Type': 'application/json' };
   const employeeNo = (() => { try { const t = localStorage.getItem('access_token'); return JSON.parse(atob(t.split('.')[1])).employee_no; } catch { return ''; } })();
 
-  const [activeKeys, setActiveKeys] = useState([]);
-  const [globalReadOnly, setGlobalReadOnly] = useState(true);
+  const {
+    selectedPlant, setSelectedPlant,
+    selectedWorkCentre, setSelectedWorkCentre,
+    selectedShift, setSelectedShift,
+    selectedDate, setSelectedDate,
+    machineDowntimeData, setMachineDowntimeData,
+    targetCycleData, setTargetCycleData,
+    resourceData, setResourceData,
+    productionData, setProductionData,
+    complaintData, setComplaintData,
+    globalReadOnly, setGlobalReadOnly,
+    dataSaved, setDataSaved,
+    activeKeys, setActiveKeys,
+    clearSections,
+  } = useTransaction();
 
   const [plants, setPlants] = useState([]);
   const [workCenters, setWorkCenters] = useState([]);
@@ -193,17 +239,7 @@ export default function TransactionPage() {
   const [variants, setVariants] = useState([]);
   const [shifts, setShifts] = useState([]);
   const [shiftPlanning, setShiftPlanning] = useState([]);
-
-  const [selectedPlant, setSelectedPlant] = useState(null);
-  const [selectedWorkCentre, setSelectedWorkCentre] = useState(null);
-  const [selectedShift, setSelectedShift] = useState(null);
-  const [selectedDate, setSelectedDate] = useState(null);
-
-  const [machineDowntimeData, setMachineDowntimeData] = useState([]);
-  const [targetCycleData, setTargetCycleData] = useState([]);
-  const [resourceData, setResourceData] = useState([]);
-  const [productionData, setProductionData] = useState([]);
-  const [complaintData, setComplaintData] = useState([]);
+  const [calculating, setCalculating] = useState(false);
 
   useEffect(() => {
     apiFetch(`/plants/`).then(r => r.json()).then(d => setPlants(Array.isArray(d) ? d : []));
@@ -223,7 +259,6 @@ export default function TransactionPage() {
     return shifts.filter(s => planned.includes(s.shift_name));
   }, [shifts, shiftPlanning, selectedWorkCentre]);
 
-  // Shift duration in minutes — parsed from duration string e.g. "8:00 AM - 4:00 PM"
   const shiftDurationMinutes = useMemo(() => {
     if (!selectedShift) return null;
     const shift = shifts.find(s => s.shift_name === selectedShift);
@@ -255,10 +290,7 @@ export default function TransactionPage() {
   const deleteRow = (setter, existing, key) => setter(existing.filter(r => r.key !== key));
 
   const handleShow = async () => {
-    if (!selectedPlant || !selectedWorkCentre || !selectedShift || !selectedDate) {
-      modal.error({ title: 'Error', content: 'Please select Plant, Work Centre, Shift and Date.' });
-      return;
-    }
+    if (!selectedPlant || !selectedWorkCentre || !selectedShift || !selectedDate) return;
     const dateStr = selectedDate.format('YYYY-MM-DD');
     const res = await apiFetch(`/transactions/?facility=${selectedPlant}&work_center=${selectedWorkCentre}&shift=${selectedShift}&date=${dateStr}`);
     const data = await res.json();
@@ -274,12 +306,14 @@ export default function TransactionPage() {
       setProductionData((data.production || []).map((r, i) => ({ ...r, key: String(i) })));
       setComplaintData((data.complaints || []).map((r, i) => ({ ...r, key: String(i) })));
       setGlobalReadOnly(true);
+      setDataSaved(false);
       setActiveKeys(['1', '2', '3']);
       modal.success({ title: 'Transaction loaded.' });
     } else {
       setMachineDowntimeData([]); setTargetCycleData([]); setResourceData([]);
       setProductionData([]); setComplaintData([]);
       setGlobalReadOnly(false);
+      setDataSaved(false);
       setActiveKeys(['1', '2', '3']);
       modal.info({ title: 'No existing transaction found. You can enter new data.' });
     }
@@ -310,15 +344,12 @@ export default function TransactionPage() {
       modal.error({ title: 'Error', content: 'Please fill in all header fields.' });
       return;
     }
-
     const payload = { ...buildPayload(), employee_no: employeeNo, section: sectionKey, data: sectionData };
     const res = await apiFetch(`/transactions/section/`, { method: 'POST', headers: authHeaders, body: JSON.stringify(payload) });
     const json = await res.json();
-    if (res.ok) modal.success({ title: `${SECTION_LABELS[sectionKey] || sectionKey} saved successfully.` });
+    if (res.ok) { modal.success({ title: `${SECTION_LABELS[sectionKey] || sectionKey} saved successfully.` }); setDataSaved(true); }
     else modal.error({ title: 'Save failed', content: json.error || 'Failed to save.' });
   };
-
-  const [calculating, setCalculating] = useState(false);
 
   const handleCalculate = async () => {
     if (!selectedPlant || !selectedWorkCentre || !selectedShift || !selectedDate) {
@@ -327,10 +358,7 @@ export default function TransactionPage() {
     }
     const missing = validateCycleTimes();
     if (missing.length > 0) {
-      modal.error({
-        title: 'Missing Target Cycle Time',
-        content: `Please enter a target cycle time in Section B for: ${missing.join(', ')}`,
-      });
+      modal.error({ title: 'Missing Target Cycle Time', content: `Please enter a target cycle time in Section B for: ${missing.join(', ')}` });
       return;
     }
     setCalculating(true);
@@ -346,10 +374,7 @@ export default function TransactionPage() {
         }),
       });
       const json = await res.json();
-      if (!res.ok) {
-        modal.error({ title: 'Calculation failed', content: json.error || 'Failed to calculate KPIs.' });
-        return;
-      }
+      if (!res.ok) { modal.error({ title: 'Calculation failed', content: json.error || 'Failed to calculate KPIs.' }); return; }
       modal.success({ title: 'KPIs calculated and saved successfully.' });
     } finally {
       setCalculating(false);
@@ -363,10 +388,11 @@ export default function TransactionPage() {
         title: 'Edit Transaction',
         content: 'You are about to edit an existing transaction. Continue?',
         okText: 'Edit',
-        onOk: () => setGlobalReadOnly(false),
+        onOk: () => { setGlobalReadOnly(false); setDataSaved(false); },
       });
     } else {
       setGlobalReadOnly(false);
+      setDataSaved(false);
     }
   };
 
@@ -377,30 +403,33 @@ export default function TransactionPage() {
           <div style={styles.formRow}>
             <Form.Item label="Plant" style={styles.formItem}>
               <Select placeholder="Plant" style={{ width: '120px' }} size="small" value={selectedPlant}
-                onChange={(val) => { setSelectedPlant(val); setSelectedWorkCentre(null); setSelectedShift(null); }}>
+                onChange={(val) => { setSelectedPlant(val); setSelectedWorkCentre(null); setSelectedShift(null); clearSections(); }}>
                 {plants.map(p => <Option key={p.facility} value={p.facility}>{p.facility}</Option>)}
               </Select>
             </Form.Item>
             <Form.Item label="Work Centre" style={styles.formItem}>
               <Select placeholder="Work Centre" style={{ width: '150px' }} size="small" value={selectedWorkCentre}
-                disabled={!selectedPlant} onChange={(val) => { setSelectedWorkCentre(val); setSelectedShift(null); }}>
+                disabled={!selectedPlant} onChange={(val) => { setSelectedWorkCentre(val); setSelectedShift(null); clearSections(); }}>
                 {filteredWCs.map(wc => <Option key={wc.work_center} value={wc.work_center}>{wc.work_center}</Option>)}
               </Select>
             </Form.Item>
             <Form.Item label="Shift" style={styles.formItem}>
-              <Select placeholder="Shift" style={{ width: '130px' }} size="small" value={selectedShift} disabled={!selectedWorkCentre} onChange={setSelectedShift}>
+              <Select placeholder="Shift" style={{ width: '130px' }} size="small" value={selectedShift} disabled={!selectedWorkCentre} onChange={(val) => { setSelectedShift(val); clearSections(); }}>
                 {filteredShifts.map(s => <Option key={s.id} value={s.shift_name}>{s.shift_name}</Option>)}
               </Select>
             </Form.Item>
             <Form.Item label="Date" style={styles.formItem}>
-              <DatePicker style={{ width: '130px' }} size="small" value={selectedDate} onChange={setSelectedDate} />
+              <DatePicker style={{ width: '130px' }} size="small" value={selectedDate} onChange={(val) => { setSelectedDate(val); clearSections(); }} />
             </Form.Item>
             <Form.Item style={styles.formItem}>
-              <Button type="primary" size="small" onClick={handleShow}>SHOW</Button>
+              <Button type="primary" size="small"
+                disabled={!selectedPlant || !selectedWorkCentre || !selectedShift || !selectedDate}
+                onClick={handleShow}>SHOW</Button>
             </Form.Item>
             <Form.Item style={styles.formItem}>
               <Button size="small" style={{ borderColor: colors.secondaryText, color: colors.secondaryText }}
-                disabled={!globalReadOnly} onClick={handleEdit}>EDIT</Button>
+                disabled={!selectedPlant || !selectedWorkCentre || !selectedShift || !selectedDate || !globalReadOnly}
+                onClick={handleEdit}>EDIT</Button>
             </Form.Item>
           </div>
         </Form>
@@ -410,8 +439,9 @@ export default function TransactionPage() {
         <Button
           icon={<CalculatorOutlined />}
           loading={calculating}
+          disabled={!dataSaved}
           onClick={handleCalculate}
-          style={{ borderColor: colors.primary, color: colors.primary }}
+          style={dataSaved ? { borderColor: colors.primary, color: colors.primary } : {}}
         >CALCULATE</Button>
       </div>
 

@@ -1,15 +1,17 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import dayjs from 'dayjs';
+import * as XLSX from 'xlsx';
 import { Card, Select, Button, DatePicker, Row, Col, Spin, Empty, Statistic, Tooltip as AntTooltip, Tabs } from 'antd';
-import { ReloadOutlined } from '@ant-design/icons';
+import { ReloadOutlined, DownloadOutlined } from '@ant-design/icons';
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
-  XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid,
+  XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid, RadialBarChart, RadialBar,
 } from 'recharts';
 import colors from '../../theme/colors';
 import constants from '../../theme/constants';
 
 import apiFetch from '../../utils/apiFetch';
+import { useProduction } from '../../context/ProductionContext';
 
 const { Option } = Select;
 const NOK_COLORS = ['#ff4d4f', '#faad14', '#c32d3e', '#005EA1', '#722ed1'];
@@ -53,13 +55,15 @@ const [plants, setPlants] = useState([]);
   const [shiftPlanning, setShiftPlanning] = useState([]);
   const [variants, setVariants] = useState([]);
 
-  const [selectedPlant, setSelectedPlant] = useState(null);
-  const [selectedWC, setSelectedWC] = useState(null);
-  const [selectedWS, setSelectedWS] = useState(null);
-  const [selectedModule, setSelectedModule] = useState(null);
-  const [selectedShift, setSelectedShift] = useState(null);
-  const [selectedVariant, setSelectedVariant] = useState(null);
-  const [selectedDate, setSelectedDate] = useState(null);
+  const {
+    selectedPlant, setSelectedPlant,
+    selectedWC, setSelectedWC,
+    selectedWS, setSelectedWS,
+    selectedModule, setSelectedModule,
+    selectedShift, setSelectedShift,
+    selectedVariant, setSelectedVariant,
+    selectedDate, setSelectedDate,
+  } = useProduction();
 
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
@@ -127,16 +131,79 @@ const [plants, setPlants] = useState([]);
 
   const fmt2 = (v) => v != null ? parseFloat(v).toFixed(2) : '—';
 
-  const oeeKpis = data?.oeeKpis ? [
-    { title: 'OEE', value: fmt2(data.oeeKpis.oee), suffix: '', color: colors.primary, tooltip: 'Overall Equipment Effectiveness = (OK × Cycle Time) / TB' },
-    { title: 'Availability (EA)', value: fmt2(data.oeeKpis.availability), suffix: '', color: colors.success, tooltip: 'Availability = TN / TB' },
-    { title: 'Performance (PE)', value: fmt2(data.oeeKpis.performance), suffix: '', color: colors.secondaryText, tooltip: 'Performance = (Cycle Time × PPcs) / TN' },
-    { title: 'Quality (QR)', value: fmt2(data.oeeKpis.quality), suffix: '', color: colors.warning, tooltip: 'Quality = OK / PPcs' },
+  const oeeKpi = data?.oeeKpis ? { title: 'OEE', value: fmt2(data.oeeKpis.oee), suffix: '', color: colors.primary } : null;
+
+  const analysisKpis = data?.oeeKpis ? [
+    { title: 'Availability (EA)', value: fmt2(data.oeeKpis.availability), suffix: '', color: colors.success },
+    { title: 'Performance (PE)', value: fmt2(data.oeeKpis.performance), suffix: '', color: colors.secondaryText },
+    { title: 'Quality (QR)', value: fmt2(data.oeeKpis.quality), suffix: '', color: colors.warning },
   ] : null;
 
   const wsKpiRows = data?.wsKpiRows || [];
 
   const hasData = data && data.kpis.totalProduction > 0;
+
+  const handleExport = () => {
+    if (!data) return;
+    const wb = XLSX.utils.book_new();
+
+    // Sheet 1 — KPI Summary
+    const kpiRows = [
+      ['Metric', 'Value'],
+      ['Total Production (pcs)', data.kpis.totalProduction],
+      ['OK Count (pcs)', data.kpis.totalOk],
+      ['NOK Count (pcs)', data.kpis.totalNok],
+      ['Quality Rate (%)', data.kpis.quality],
+      ['Total Downtime (sec)', data.kpis.totalDowntime],
+    ];
+    if (data.oeeKpis) {
+      kpiRows.push(
+        ['OEE', data.oeeKpis.oee != null ? parseFloat(data.oeeKpis.oee).toFixed(4) : '—'],
+        ['Availability (EA)', data.oeeKpis.availability != null ? parseFloat(data.oeeKpis.availability).toFixed(4) : '—'],
+        ['Performance (PE)', data.oeeKpis.performance != null ? parseFloat(data.oeeKpis.performance).toFixed(4) : '—'],
+        ['Quality (QR)', data.oeeKpis.quality != null ? parseFloat(data.oeeKpis.quality).toFixed(4) : '—'],
+      );
+    }
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(kpiRows), 'KPI Summary');
+
+    // Sheet 2 — OEE by Workstation
+    if (data.wsKpiRows?.length > 0) {
+      const wsRows = [['Workstation', 'Shift', 'Date', 'OEE', 'Availability (EA)', 'Performance (PE)', 'Quality (QR)', 'TB (sec)', 'TN (sec)']];
+      data.wsKpiRows.forEach(r => wsRows.push([
+        r.workstation, r.shift, r.date,
+        r.oee != null ? parseFloat(r.oee).toFixed(4) : '—',
+        r.availability != null ? parseFloat(r.availability).toFixed(4) : '—',
+        r.performance != null ? parseFloat(r.performance).toFixed(4) : '—',
+        r.quality != null ? parseFloat(r.quality).toFixed(4) : '—',
+        r.tb ?? '—', r.tn ?? '—',
+      ]));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsRows), 'OEE by Workstation');
+    }
+
+    // Sheet 3 — Production by Variant
+    if (data.productionByVariant?.length > 0) {
+      const pvRows = [['Variant', 'OK', 'NOK']];
+      data.productionByVariant.forEach(r => pvRows.push([r.variant, r.ok, r.nok]));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(pvRows), 'Production by Variant');
+    }
+
+    // Sheet 4 — Downtime by Reason Code
+    if (data.downtimeByReason?.length > 0) {
+      const dtRows = [['Reason Code', 'Description', 'Duration (sec)']];
+      data.downtimeByReason.forEach(r => dtRows.push([r.reasonCode, r.description, r.duration]));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dtRows), 'Downtime by Reason');
+    }
+
+    // Sheet 5 — Production Trend
+    if (data.productionTrend?.length > 0) {
+      const trendRows = [['Date', 'OK', 'NOK']];
+      data.productionTrend.forEach(r => trendRows.push([r.date, r.ok, r.nok]));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(trendRows), 'Production Trend');
+    }
+
+    const filters = [selectedPlant, selectedWC, selectedWS, selectedShift, selectedDate?.format('YYYY-MM-DD')].filter(Boolean).join('_') || 'all';
+    XLSX.writeFile(wb, `Production_Dashboard_${filters}_${dayjs().format('YYYYMMDD_HHmm')}.xlsx`);
+  };
 
   return (
     <div style={styles.wrapper}>
@@ -195,6 +262,10 @@ const [plants, setPlants] = useState([]);
             onClick={fetchDashboard} loading={loading}>
             Refresh
           </Button>
+          <Button icon={<DownloadOutlined />} style={{ width: '100%', marginTop: constants.spacing.sm }}
+            disabled={!data} onClick={handleExport}>
+            Export Excel
+          </Button>
         </Card>
       </div>
 
@@ -232,13 +303,45 @@ const [plants, setPlants] = useState([]);
                 </Card>
               ) : (
                 <>
-                    {/* OEE — Downtime by Reason Code */}
+                    {/* Row 1: OEE Gauge + Downtime side by side */}
                     <Row gutter={[16, 16]}>
-                      <Col xs={24}>
+                      {oeeKpi && (() => {
+                        const oeeVal = parseFloat(oeeKpi.value);
+                        const pct = isNaN(oeeVal) ? 0 : Math.min(oeeVal, 1);
+                        const gaugeColor = pct >= 0.85 ? colors.success : pct >= 0.6 ? colors.warning : colors.primary;
+                        return (
+                          <Col xs={24} lg={7}>
+                            <Card
+                              style={{ ...styles.kpiCard, marginTop: constants.spacing.lg, height: 310 }}
+                              title={<span style={{ fontSize: '13px', fontWeight: '700', fontFamily: constants.fontFamily, color: colors.textPrimary }}>OEE</span>}
+                            >
+                              <div style={{ position: 'relative', width: '100%', height: 200 }}>
+                                <ResponsiveContainer width="100%" height={200}>
+                                  <RadialBarChart
+                                    cx="50%" cy="75%"
+                                    innerRadius="65%" outerRadius="95%"
+                                    startAngle={180} endAngle={0}
+                                    data={[{ value: 100, fill: '#f0f0f0' }, { value: pct * 100, fill: gaugeColor }]}
+                                    barSize={20}
+                                  >
+                                    <RadialBar dataKey="value" background={false} />
+                                  </RadialBarChart>
+                                </ResponsiveContainer>
+                                <div style={{ position: 'absolute', bottom: 20, width: '100%', textAlign: 'center' }}>
+                                  <div style={{ fontSize: '42px', fontWeight: '700', color: gaugeColor, fontFamily: constants.fontFamily, lineHeight: 1 }}>
+                                    {isNaN(oeeVal) ? '—' : oeeVal.toFixed(2)}
+                                  </div>
+                                </div>
+                              </div>
+                            </Card>
+                          </Col>
+                        );
+                      })()}
+                      <Col xs={24} lg={oeeKpi ? 17 : 24}>
                         <Card style={styles.chartCard}>
                           <span style={styles.chartTitle}>Downtime by Reason Code (mm:ss)</span>
                           {data.downtimeByReason.length > 0 ? (
-                            <ResponsiveContainer width="100%" height={260}>
+                            <ResponsiveContainer width="100%" height={240}>
                               <BarChart data={data.downtimeByReason} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                                 <XAxis dataKey="description" tick={{ fontSize: 11, fontFamily: constants.fontFamily }} />
@@ -252,7 +355,7 @@ const [plants, setPlants] = useState([]);
                       </Col>
                     </Row>
 
-                    {/* Total Production Volume */}
+                    {/* Row 2: Total Production Volume full width */}
                     <Row gutter={[16, 16]} style={{ marginTop: constants.spacing.lg }}>
                       <Col xs={24}>
                         <Card style={styles.chartCard}>
@@ -272,7 +375,7 @@ const [plants, setPlants] = useState([]);
                       </Col>
                     </Row>
 
-                    {/* OK Count by Variant + NOK Count by Variant */}
+                    {/* Row 3: OK + NOK side by side */}
                     <Row gutter={[16, 16]} style={{ marginTop: constants.spacing.lg }}>
                       <Col xs={24} lg={12}>
                         <Card style={styles.chartCard}>
@@ -309,87 +412,50 @@ const [plants, setPlants] = useState([]);
             {
               key: 'analysis',
               label: 'Production Analysis',
-              children: (() => {
-                const hasOee = data && (data.oeeKpis?.oee != null || wsKpiRows.length > 0);
-                if (!data || (!hasData && !hasOee)) return (
-                  <Card style={styles.chartCard}>
-                    <Empty description="No production or OEE data found for the selected filters." />
-                  </Card>
-                );
-                return (
-                  <>
-                    {/* OEE KPI Cards — per-WS rows as cards when WS selected, else WC-level */}
-                    {wsKpiRows.length > 0 ? (
-                      wsKpiRows.map((ws, wi) => (
-                        <div key={wi}>
-                          <span style={{ ...styles.chartTitle, marginTop: wi > 0 ? constants.spacing.lg : 0, display: 'block' }}>
-                            {ws.workstation} — {ws.shift} — {ws.date}
-                          </span>
-                          <Row gutter={[12, 12]}>
-                            {[
-                              { title: 'OEE', value: fmt2(ws.oee), color: colors.primary, tooltip: 'OEE = (OK × TCT) / TB' },
-                              { title: 'Availability (EA)', value: fmt2(ws.availability), color: colors.success, tooltip: 'EA = TN / TB' },
-                              { title: 'Performance (PE)', value: fmt2(ws.performance), color: colors.secondaryText, tooltip: 'PE = (TCT × PPcs) / TN' },
-                              { title: 'Quality (QR)', value: fmt2(ws.quality), color: colors.warning, tooltip: 'QR = OK / PPcs' },
-                            ].map((kpi, i) => (
-                              <Col xs={12} sm={6} key={i}>
-                                <AntTooltip title={kpi.tooltip}>
-                                  <Card style={{ ...styles.kpiCard, cursor: 'default' }}>
-                                    <Statistic
-                                      title={<span style={{ fontSize: '12px', color: colors.textSecondary, fontFamily: constants.fontFamily }}>{kpi.title}</span>}
-                                      value={kpi.value}
-                                      valueStyle={{ color: kpi.color, fontSize: '20px', fontFamily: constants.fontFamily }}
-                                    />
-                                  </Card>
-                                </AntTooltip>
-                              </Col>
-                            ))}
-                          </Row>
-                        </div>
-                      ))
-                    ) : oeeKpis && (
-                      <Row gutter={[12, 12]}>
-                        {oeeKpis.map((kpi, i) => (
-                          <Col xs={24} sm={12} lg={6} key={i} style={{ flex: '1 1 0' }}>
-                            <AntTooltip title={kpi.tooltip}>
-                              <Card style={{ ...styles.kpiCard, cursor: 'default' }}>
-                                <Statistic
-                                  title={<span style={{ fontSize: '12px', color: colors.textSecondary, fontFamily: constants.fontFamily }}>{kpi.title}</span>}
-                                  value={kpi.value}
-                                  suffix={kpi.suffix}
-                                  valueStyle={{ color: kpi.color, fontSize: '22px', fontFamily: constants.fontFamily }}
-                                />
-                              </Card>
-                            </AntTooltip>
-                          </Col>
-                        ))}
-                      </Row>
-                    )}
-
-                    {/* Production Trend */}
-                    {hasData && (data.productionTrend.length > 0 ? (
-                      <Row gutter={[16, 16]} style={{ marginTop: constants.spacing.lg }}>
-                        <Col xs={24}>
-                          <Card style={styles.chartCard}>
-                            <span style={styles.chartTitle}>Production Trend by Date</span>
-                            <ResponsiveContainer width="100%" height={280}>
-                              <LineChart data={data.productionTrend} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                                <XAxis dataKey="date" tick={{ fontSize: 11, fontFamily: constants.fontFamily }} />
-                                <YAxis tick={{ fontSize: 11, fontFamily: constants.fontFamily }} />
-                                <Tooltip />
-                                <Legend />
-                                <Line type="monotone" dataKey="ok" name="OK" stroke={colors.success} strokeWidth={2} dot={{ r: 4 }} />
-                                <Line type="monotone" dataKey="nok" name="NOK" stroke={colors.error} strokeWidth={2} dot={{ r: 4 }} />
-                              </LineChart>
-                            </ResponsiveContainer>
+              children: !data || !hasData ? (
+                <Card style={styles.chartCard}>
+                  <Empty description="No production data found for the selected filters." />
+                </Card>
+              ) : (
+                <>
+                  {analysisKpis && (
+                    <Row gutter={[12, 12]} style={{ marginBottom: constants.spacing.lg }}>
+                      {analysisKpis.map((kpi, i) => (
+                        <Col xs={12} sm={8} key={i}>
+                          <Card style={styles.kpiCard}>
+                            <Statistic
+                              title={<span style={{ fontSize: '12px', color: colors.textSecondary, fontFamily: constants.fontFamily }}>{kpi.title}</span>}
+                              value={kpi.value}
+                              suffix={kpi.suffix}
+                              valueStyle={{ color: kpi.color, fontSize: '22px', fontFamily: constants.fontFamily }}
+                            />
                           </Card>
                         </Col>
-                      </Row>
-                    ) : <Empty description="No trend data available." style={{ marginTop: 40 }} />)}
-                  </>
-                );
-              })(),
+                      ))}
+                    </Row>
+                  )}
+                  {data.productionTrend.length > 0 ? (
+                <Row gutter={[16, 16]}>
+                  <Col xs={24}>
+                    <Card style={styles.chartCard}>
+                      <span style={styles.chartTitle}>Production Trend by Date</span>
+                      <ResponsiveContainer width="100%" height={280}>
+                        <LineChart data={data.productionTrend} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                          <XAxis dataKey="date" tick={{ fontSize: 11, fontFamily: constants.fontFamily }} />
+                          <YAxis tick={{ fontSize: 11, fontFamily: constants.fontFamily }} />
+                          <Tooltip />
+                          <Legend />
+                          <Line type="monotone" dataKey="ok" name="OK" stroke={colors.success} strokeWidth={2} dot={{ r: 4 }} />
+                          <Line type="monotone" dataKey="nok" name="NOK" stroke={colors.error} strokeWidth={2} dot={{ r: 4 }} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </Card>
+                  </Col>
+                </Row>
+              ) : <Empty description="No trend data available." style={{ marginTop: 40 }} />}
+                </>
+              ),
             },
           ]} />
 

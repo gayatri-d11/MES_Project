@@ -1668,87 +1668,82 @@ class ProductionDashboardView(APIView):
             nok_type_map[key] = nok_type_map.get(key, 0) + (n.nok_count or 0)
         nok_by_type = [{'type': k, 'count': v} for k, v in nok_type_map.items()]
 
-        # OEE KPIs from TblKpiWorkCenter / TblKpiWorkStation
+        # OEE KPIs — branch on workstation first, then work_center
+        # variant filter cannot be applied to KPI tables (they store aggregated values)
+        # so when variant is selected we skip OEE cards (they are not variant-specific)
         oee_kpis = {'oee': None, 'availability': None, 'performance': None, 'quality': None}
         ws_kpi_rows = []
-        if work_center:
-            kpi_wc_qs = TblKpiWorkCenter.objects.filter(work_center__work_center=work_center)
-            if facility:
-                kpi_wc_qs = kpi_wc_qs.filter(facility__facility=facility)
-            if shift_name:
-                kpi_wc_qs = kpi_wc_qs.filter(shift=shift_name)
-            if date_from:
-                kpi_wc_qs = kpi_wc_qs.filter(day_date__date__gte=date_from)
-            if date_to:
-                kpi_wc_qs = kpi_wc_qs.filter(day_date__date__lte=date_to)
-            rows_wc = list(kpi_wc_qs)
-            if rows_wc:
-                def _avg(field):
-                    vals = [float(getattr(r, field)) for r in rows_wc if getattr(r, field) is not None]
-                    return round(sum(vals) / len(vals), 4) if vals else None
-                oee_kpis = {
-                    'oee': _avg('oee'),
-                    'availability': _avg('availability'),
-                    'performance': _avg('performance'),
-                    'quality': _avg('quality'),
+
+        if not variant:  # OEE KPIs are not variant-specific; suppress when variant filter active
+            def _build_kpi_ws_qs(base_qs):
+                if facility:
+                    base_qs = base_qs.filter(facility__facility=facility)
+                if shift_name:
+                    base_qs = base_qs.filter(shift=shift_name)
+                if date_from:
+                    base_qs = base_qs.filter(day_date__date__gte=date_from)
+                if date_to:
+                    base_qs = base_qs.filter(day_date__date__lte=date_to)
+                return base_qs
+
+            def _avg(rows, field):
+                vals = [float(getattr(r, field)) for r in rows if getattr(r, field) is not None]
+                return round(sum(vals) / len(vals), 4) if vals else None
+
+            def _ws_row(r):
+                return {
+                    'workstation': r.resource.resource_name,
+                    'oee': round(float(r.oee), 4) if r.oee is not None else None,
+                    'availability': round(float(r.availability), 4) if r.availability is not None else None,
+                    'performance': round(float(r.performance), 4) if r.performance is not None else None,
+                    'quality': round(float(r.quality), 4) if r.quality is not None else None,
+                    'tb': round(float(r.tb_val), 1) if r.tb_val is not None else None,
+                    'tn': round(float(r.tn_val), 1) if r.tn_val is not None else None,
+                    'shift': r.shift,
+                    'date': str(r.day_date.date()) if r.day_date else None,
                 }
-            # Always return per-workstation KPIs when a WC is selected
-            kpi_ws_qs = TblKpiWorkStation.objects.filter(resource__work_center__work_center=work_center)
-            if facility:
-                kpi_ws_qs = kpi_ws_qs.filter(facility__facility=facility)
-            if shift_name:
-                kpi_ws_qs = kpi_ws_qs.filter(shift=shift_name)
-            if date_from:
-                kpi_ws_qs = kpi_ws_qs.filter(day_date__date__gte=date_from)
-            if date_to:
-                kpi_ws_qs = kpi_ws_qs.filter(day_date__date__lte=date_to)
+
             if workstation:
-                kpi_ws_qs = kpi_ws_qs.filter(resource__resource_name=workstation)
-            for r in kpi_ws_qs:
-                ws_kpi_rows.append({
-                    'workstation': r.resource.resource_name,
-                    'oee': round(float(r.oee), 4) if r.oee is not None else None,
-                    'availability': round(float(r.availability), 4) if r.availability is not None else None,
-                    'performance': round(float(r.performance), 4) if r.performance is not None else None,
-                    'quality': round(float(r.quality), 4) if r.quality is not None else None,
-                    'tb': round(float(r.tb_val), 1) if r.tb_val is not None else None,
-                    'tn': round(float(r.tn_val), 1) if r.tn_val is not None else None,
-                    'shift': r.shift,
-                    'date': str(r.day_date.date()) if r.day_date else None,
-                })
-        elif workstation:
-            kpi_ws_qs = TblKpiWorkStation.objects.filter(resource__resource_name=workstation)
-            if facility:
-                kpi_ws_qs = kpi_ws_qs.filter(facility__facility=facility)
-            if shift_name:
-                kpi_ws_qs = kpi_ws_qs.filter(shift=shift_name)
-            if date_from:
-                kpi_ws_qs = kpi_ws_qs.filter(day_date__date__gte=date_from)
-            if date_to:
-                kpi_ws_qs = kpi_ws_qs.filter(day_date__date__lte=date_to)
-            rows_ws = list(kpi_ws_qs)
-            if rows_ws:
-                def _avg_ws(field):
-                    vals = [float(getattr(r, field)) for r in rows_ws if getattr(r, field) is not None]
-                    return round(sum(vals) / len(vals), 4) if vals else None
-                oee_kpis = {
-                    'oee': _avg_ws('oee'),
-                    'availability': _avg_ws('availability'),
-                    'performance': _avg_ws('performance'),
-                    'quality': _avg_ws('quality'),
-                }
-            for r in kpi_ws_qs:
-                ws_kpi_rows.append({
-                    'workstation': r.resource.resource_name,
-                    'oee': round(float(r.oee), 4) if r.oee is not None else None,
-                    'availability': round(float(r.availability), 4) if r.availability is not None else None,
-                    'performance': round(float(r.performance), 4) if r.performance is not None else None,
-                    'quality': round(float(r.quality), 4) if r.quality is not None else None,
-                    'tb': round(float(r.tb_val), 1) if r.tb_val is not None else None,
-                    'tn': round(float(r.tn_val), 1) if r.tn_val is not None else None,
-                    'shift': r.shift,
-                    'date': str(r.day_date.date()) if r.day_date else None,
-                })
+                # Workstation selected — show that WS's own KPIs
+                kpi_ws_qs = _build_kpi_ws_qs(
+                    TblKpiWorkStation.objects.filter(resource__resource_name=workstation)
+                    .select_related('resource')
+                )
+                rows_ws = list(kpi_ws_qs)
+                if rows_ws:
+                    oee_kpis = {
+                        'oee': _avg(rows_ws, 'oee'),
+                        'availability': _avg(rows_ws, 'availability'),
+                        'performance': _avg(rows_ws, 'performance'),
+                        'quality': _avg(rows_ws, 'quality'),
+                    }
+                ws_kpi_rows = [_ws_row(r) for r in rows_ws]
+
+            elif work_center:
+                # Work center selected (no WS) — show WC-level combined KPIs
+                kpi_wc_qs = TblKpiWorkCenter.objects.filter(work_center__work_center=work_center)
+                if facility:
+                    kpi_wc_qs = kpi_wc_qs.filter(facility__facility=facility)
+                if shift_name:
+                    kpi_wc_qs = kpi_wc_qs.filter(shift=shift_name)
+                if date_from:
+                    kpi_wc_qs = kpi_wc_qs.filter(day_date__date__gte=date_from)
+                if date_to:
+                    kpi_wc_qs = kpi_wc_qs.filter(day_date__date__lte=date_to)
+                rows_wc = list(kpi_wc_qs)
+                if rows_wc:
+                    oee_kpis = {
+                        'oee': _avg(rows_wc, 'oee'),
+                        'availability': _avg(rows_wc, 'availability'),
+                        'performance': _avg(rows_wc, 'performance'),
+                        'quality': _avg(rows_wc, 'quality'),
+                    }
+                # Also populate per-WS rows for the WC
+                kpi_ws_qs = _build_kpi_ws_qs(
+                    TblKpiWorkStation.objects.filter(resource__work_center__work_center=work_center)
+                    .select_related('resource')
+                )
+                ws_kpi_rows = [_ws_row(r) for r in kpi_ws_qs]
 
         return Response({
             'kpis': {
