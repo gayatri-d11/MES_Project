@@ -23,9 +23,9 @@ urlpatterns = [
     path('products/', ProductListView.as_view(), name='products'),
     path('shifts/', ShiftListView.as_view(), name='shifts'),
     path('shift-planning/', ShiftPlanningView.as_view(), name='shift-planning'),
-    path('transactions/', TransactionView.as_view(), name='transactions'),
-    path('transactions/section/', TransactionSectionView.as_view(), name='transaction-section'),
     path('transactions/calculate/', TransactionCalculateView.as_view(), name='transaction-calculate'),
+    path('transactions/section/', TransactionSectionView.as_view(), name='transaction-section'),
+    path('transactions/', TransactionView.as_view(), name='transactions'),
     path('production-dashboard/', ProductionDashboardView.as_view(), name='production-dashboard'),
     path('change-password/', ChangePasswordView.as_view(), name='change-password'),
 ]

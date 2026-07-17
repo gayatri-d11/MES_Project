@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Card, Form, Select, Input, Button, Collapse, Table, App, DatePicker, Typography, Descriptions } from 'antd';
+import { Card, Form, Select, Input, Button, Collapse, Table, App, DatePicker, Typography } from 'antd';
 import { PlusOutlined, EditOutlined, SaveOutlined, DeleteOutlined, CalculatorOutlined } from '@ant-design/icons';
 import colors from '../../theme/colors';
 import constants from '../../theme/constants';
@@ -11,7 +11,7 @@ const { Panel } = Collapse;
 const styles = {
   headerCard: { border: `1px solid ${colors.border}`, borderRadius: constants.borderRadius, marginBottom: constants.spacing.lg },
   sectionCard: { border: `1px solid ${colors.border}`, borderRadius: constants.borderRadius },
-  formRow: { display: 'flex', gap: constants.spacing.md, flexWrap: 'nowrap', alignItems: 'flex-end', overflowX: 'auto' },
+  formRow: { display: 'flex', gap: 8, flexWrap: 'nowrap', alignItems: 'flex-end' },
   formItem: { marginBottom: 0, flexShrink: 0 },
   sectionTitle: { fontFamily: constants.fontFamily, fontWeight: '600', fontSize: '14px', color: colors.textPrimary },
   subSectionHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: constants.spacing.md },
@@ -122,11 +122,23 @@ function SectionTable({ title, inputFields, columns, data, onAdd, onDelete, onSa
                     placeholder={`Select ${field.label}`}
                     style={{ width: field.wide ? '280px' : '160px' }}
                     size="small"
+                    allowClear={field.key === 'nokType'}
                     value={rowInput[field.key] || undefined}
                     optionLabelProp="label"
-                    onChange={(val) => { setRowInput({ ...rowInput, [field.key]: val }); setError(''); }}
+                    onChange={(val) => {
+                      const next = { ...rowInput, [field.key]: val };
+                      // Reverse-link: if nokReasonCode changes, auto-set nokType
+                      if (field.key === 'nokReasonCode') {
+                        const map = { 'nok-sc': 'Scrap', 'nok-rw': 'Rework', 'nok-rt': 'Retest' };
+                        const mapped = map[val?.toLowerCase()];
+                        if (mapped) next.nokType = mapped;
+                      }
+                      // Forward-link: if nokType changes, clear nokReasonCode
+                      if (field.key === 'nokType') next.nokReasonCode = undefined;
+                      setRowInput(next); setError('');
+                    }}
                   >
-                    {(field.options || []).map((opt, i) => (
+                    {(field.optionsFn ? field.optionsFn(rowInput) : field.options || []).map((opt, i) => (
                       <Option key={i} value={opt.value} label={opt.value}>
                         {opt.description ? (
                           <div>
@@ -211,15 +223,25 @@ export default function TransactionPage() {
     return shifts.filter(s => planned.includes(s.shift_name));
   }, [shifts, shiftPlanning, selectedWorkCentre]);
 
-  // Shift duration in minutes (from shift start/end times)
+  // Shift duration in minutes — parsed from duration string e.g. "8:00 AM - 4:00 PM"
   const shiftDurationMinutes = useMemo(() => {
     if (!selectedShift) return null;
     const shift = shifts.find(s => s.shift_name === selectedShift);
-    if (!shift || !shift.start_time || !shift.end_time) return null;
-    const [sh, sm] = shift.start_time.split(':').map(Number);
-    const [eh, em] = shift.end_time.split(':').map(Number);
-    let mins = (eh * 60 + em) - (sh * 60 + sm);
-    if (mins <= 0) mins += 24 * 60; // overnight shift
+    if (!shift || !shift.duration) return null;
+    const parts = shift.duration.split(' - ');
+    if (parts.length !== 2) return null;
+    const parse = (str) => {
+      const m = str.trim().match(/^(\d+):(\d+)\s*(AM|PM)$/i);
+      if (!m) return null;
+      let h = parseInt(m[1]); const min = parseInt(m[2]); const ampm = m[3].toUpperCase();
+      if (ampm === 'AM' && h === 12) h = 0;
+      if (ampm === 'PM' && h !== 12) h += 12;
+      return h * 60 + min;
+    };
+    const start = parse(parts[0]); const end = parse(parts[1]);
+    if (start === null || end === null) return null;
+    let mins = end - start;
+    if (mins <= 0) mins += 24 * 60;
     return mins;
   }, [shifts, selectedShift]);
 
@@ -278,11 +300,9 @@ export default function TransactionPage() {
   };
 
   const validateCycleTimes = () => {
-    const downtimeModules = new Set(machineDowntimeData.map(r => r.module).filter(Boolean));
+    const downtimeModules = [...new Set(machineDowntimeData.map(r => r.module).filter(Boolean))];
     const cycleMap = Object.fromEntries(targetCycleData.map(r => [r.module, Number(r.targetCycle)]));
-    const allModules = new Set([...downtimeModules, ...Object.keys(cycleMap)]);
-    const missing = [...allModules].filter(m => !cycleMap[m]);
-    return missing;
+    return downtimeModules.filter(m => !cycleMap[m]);
   };
 
   const saveSubsection = async (sectionKey, sectionData) => {
@@ -290,14 +310,7 @@ export default function TransactionPage() {
       modal.error({ title: 'Error', content: 'Please fill in all header fields.' });
       return;
     }
-    const missing = validateCycleTimes();
-    if (missing.length > 0) {
-      modal.error({
-        title: 'Missing Target Cycle Time',
-        content: `Please enter a target cycle time in Section B for: ${missing.join(', ')}`,
-      });
-      return;
-    }
+
     const payload = { ...buildPayload(), employee_no: employeeNo, section: sectionKey, data: sectionData };
     const res = await apiFetch(`/transactions/section/`, { method: 'POST', headers: authHeaders, body: JSON.stringify(payload) });
     const json = await res.json();
@@ -337,24 +350,7 @@ export default function TransactionPage() {
         modal.error({ title: 'Calculation failed', content: json.error || 'Failed to calculate KPIs.' });
         return;
       }
-      const k = json.kpis;
-      const fmt = (v, suffix) => v != null ? `${v}${suffix}` : '—';
-      modal.success({
-        title: 'KPIs Calculated & Saved',
-        width: 480,
-        content: (
-          <Descriptions column={2} size="small" bordered style={{ marginTop: 12 }}>
-            <Descriptions.Item label="OEE">{fmt(k.oee, '%')}</Descriptions.Item>
-            <Descriptions.Item label="Availability (EA)">{fmt(k.availability, '%')}</Descriptions.Item>
-            <Descriptions.Item label="Performance (PE)">{fmt(k.performance, '%')}</Descriptions.Item>
-            <Descriptions.Item label="Quality (QR)">{fmt(k.quality, '%')}</Descriptions.Item>
-            <Descriptions.Item label="OK Parts">{k.ok_parts ?? '—'}</Descriptions.Item>
-            <Descriptions.Item label="NOK Parts">{k.nok_parts ?? '—'}</Descriptions.Item>
-            <Descriptions.Item label="TB (sec)">{fmt(k.tb_val, 's')}</Descriptions.Item>
-            <Descriptions.Item label="TN (sec)">{fmt(k.tn_val, 's')}</Descriptions.Item>
-          </Descriptions>
-        ),
-      });
+      modal.success({ title: 'KPIs calculated and saved successfully.' });
     } finally {
       setCalculating(false);
     }
@@ -377,49 +373,47 @@ export default function TransactionPage() {
   return (
     <div>
       <Card style={styles.headerCard}>
-        <div style={{ marginBottom: constants.spacing.md }}>
-          <span style={styles.sectionTitle}>Header</span>
-        </div>
-        <Form layout="vertical">
+        <Form layout="inline">
           <div style={styles.formRow}>
             <Form.Item label="Plant" style={styles.formItem}>
-              <Select placeholder="Select Plant" style={{ width: '160px' }} value={selectedPlant}
+              <Select placeholder="Plant" style={{ width: '120px' }} size="small" value={selectedPlant}
                 onChange={(val) => { setSelectedPlant(val); setSelectedWorkCentre(null); setSelectedShift(null); }}>
                 {plants.map(p => <Option key={p.facility} value={p.facility}>{p.facility}</Option>)}
               </Select>
             </Form.Item>
             <Form.Item label="Work Centre" style={styles.formItem}>
-              <Select placeholder="Select Work Centre" style={{ width: '180px' }} value={selectedWorkCentre}
+              <Select placeholder="Work Centre" style={{ width: '150px' }} size="small" value={selectedWorkCentre}
                 disabled={!selectedPlant} onChange={(val) => { setSelectedWorkCentre(val); setSelectedShift(null); }}>
                 {filteredWCs.map(wc => <Option key={wc.work_center} value={wc.work_center}>{wc.work_center}</Option>)}
               </Select>
             </Form.Item>
             <Form.Item label="Shift" style={styles.formItem}>
-              <Select placeholder="Select Shift" style={{ width: '160px' }} value={selectedShift} disabled={!selectedWorkCentre} onChange={setSelectedShift}>
+              <Select placeholder="Shift" style={{ width: '130px' }} size="small" value={selectedShift} disabled={!selectedWorkCentre} onChange={setSelectedShift}>
                 {filteredShifts.map(s => <Option key={s.id} value={s.shift_name}>{s.shift_name}</Option>)}
               </Select>
             </Form.Item>
             <Form.Item label="Date" style={styles.formItem}>
-              <DatePicker style={{ width: '160px' }} value={selectedDate} onChange={setSelectedDate} />
+              <DatePicker style={{ width: '130px' }} size="small" value={selectedDate} onChange={setSelectedDate} />
             </Form.Item>
             <Form.Item style={styles.formItem}>
-              <Button type="primary" onClick={handleShow}>SHOW</Button>
+              <Button type="primary" size="small" onClick={handleShow}>SHOW</Button>
             </Form.Item>
             <Form.Item style={styles.formItem}>
-              <Button style={{ borderColor: colors.secondaryText, color: colors.secondaryText }}
+              <Button size="small" style={{ borderColor: colors.secondaryText, color: colors.secondaryText }}
                 disabled={!globalReadOnly} onClick={handleEdit}>EDIT</Button>
-            </Form.Item>
-            <Form.Item style={styles.formItem}>
-              <Button
-                icon={<CalculatorOutlined />}
-                loading={calculating}
-                onClick={handleCalculate}
-                style={{ borderColor: colors.primary, color: colors.primary }}
-              >CALCULATE</Button>
             </Form.Item>
           </div>
         </Form>
       </Card>
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: constants.spacing.sm }}>
+        <Button
+          icon={<CalculatorOutlined />}
+          loading={calculating}
+          onClick={handleCalculate}
+          style={{ borderColor: colors.primary, color: colors.primary }}
+        >CALCULATE</Button>
+      </div>
 
       <Card style={styles.sectionCard}>
         <Collapse activeKey={activeKeys} onChange={setActiveKeys} ghost>
@@ -487,8 +481,22 @@ export default function TransactionPage() {
                 { label: 'Variant Type', key: 'variantType', type: 'select', options: variantOptions },
                 { label: 'OK Count', key: 'okCount', type: 'input', numeric: true },
                 { label: 'NOK Count', key: 'nokCount', type: 'input', numeric: true, required: false },
-                { label: 'NOK Type', key: 'nokType', type: 'select', options: [{ value: 'Scrap', label: 'Scrap' }, { value: 'Rework', label: 'Rework' }, { value: 'Retest', label: 'Retest' }], conditionalOn: { key: 'nokCount' } },
-                { label: 'NOK Reason Code', key: 'nokReasonCode', type: 'select', options: nokReasonCodes, wide: true, conditionalOn: { key: 'nokCount' } },
+                { label: 'NOK Type', key: 'nokType', type: 'select', conditionalOn: { key: 'nokCount' },
+                  optionsFn: (row) => {
+                    const map = { 'nok-sc': 'Scrap', 'nok-rw': 'Rework', 'nok-rt': 'Retest' };
+                    const forced = map[row.nokReasonCode?.toLowerCase()];
+                    const all = [{ value: 'Scrap', label: 'Scrap' }, { value: 'Rework', label: 'Rework' }, { value: 'Retest', label: 'Retest' }];
+                    return forced ? all.filter(o => o.value === forced) : all;
+                  },
+                },
+                { label: 'NOK Reason Code', key: 'nokReasonCode', type: 'select', wide: true, conditionalOn: { key: 'nokCount' },
+                  optionsFn: (row) => {
+                    if (row.nokType === 'Scrap') return nokReasonCodes.filter(r => r.value.toLowerCase() === 'nok-sc');
+                    if (row.nokType === 'Rework') return nokReasonCodes.filter(r => r.value.toLowerCase() === 'nok-rw');
+                    if (row.nokType === 'Retest') return nokReasonCodes.filter(r => r.value.toLowerCase() === 'nok-rt');
+                    return nokReasonCodes;
+                  },
+                },
               ]}
             />
           </Panel>

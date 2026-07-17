@@ -3,6 +3,7 @@
 
 # Chat exports
 conversation*.md
+q-dev-chat*.md
 
 # OS
 .DS_Store

@@ -14,32 +14,29 @@ Follow these steps in order on any new machine.
 
 ## 1. Database Setup
 
-**pgAdmin is required for this step.**
-
-Open pgAdmin (or psql CLI) and create the database:
+Open pgAdmin and create the database:
 
 ```sql
 CREATE DATABASE brose_db;
 ```
 
 Make sure your PostgreSQL user is `postgres` with password `postgres` on port `5432`.
-If different, update the `.env` file in `brose_backend/` accordingly.
+If different, update the `.env` file in `MES_Backend/` accordingly.
 
 > pgAdmin is also useful for inspecting tables, running queries, and debugging data issues during development.
-> You will need it throughout the project — not just for setup.
 
 ---
 
-## 2. Environment File
+## 2. Environment Files
 
-The `brose_backend/.env` file is not committed to Git. Copy the example and fill in your values:
+**Backend:**
 
 ```bash
-cd brose_backend
+cd MES_Backend
 copy .env.example .env
 ```
 
-Then open `.env` and set your values:
+Open `.env` and set your values:
 
 ```
 DB_NAME=brose_db
@@ -53,10 +50,10 @@ ALLOWED_HOSTS=localhost,127.0.0.1
 CORS_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000
 ```
 
-Also create the frontend `.env`:
+**Frontend:**
 
 ```bash
-cd brose-platform
+cd MES_Frontend
 copy .env.example .env
 ```
 
@@ -67,16 +64,7 @@ The default value `VITE_API_BASE_URL=http://localhost:8000/api` is correct for l
 ## 3. Backend Setup
 
 ```bash
-cd brose_backend
-
-# Create and activate virtual environment
-python -m venv venv
-
-# Windows
-venv\Scripts\activate
-
-# Mac/Linux
-source venv/bin/activate
+cd MES_Backend
 
 # Install dependencies
 pip install -r requirements.txt
@@ -97,25 +85,22 @@ python manage.py setup_project
 
 This creates:
 - Admin user, role, and all page permissions
-- Sample plant, work centers, workstations, machines
+- Sample plant (`Plant-A`), work centers, workstations, machines
 - All 14 standard Brose reason types
-- Reason codes, shifts, shift planning, products
+- Reason codes (including `NOK-SC`, `NOK-RW`, `NOK-RT`), shifts, shift planning, products
 
 Default admin login:
 - Employee No: `BR-00000001`
 - Password: `Admin@123`
 
-> **Why this command instead of SQL files?**
-> The `setup_project` command uses Django's ORM, so it works on any database and respects
-> your models. It has proper error handling and is safe to run multiple times (idempotent).
-> Raw `.sql` files are PostgreSQL-specific, have no error handling, and break if run before
-> migrations. This is the correct approach for a corporate project.
+> `setup_project` is safe to run multiple times (idempotent).
 
 ---
 
 ## 5. Start Backend
 
 ```bash
+cd MES_Backend
 python manage.py runserver
 ```
 
@@ -126,7 +111,7 @@ Backend runs at: http://localhost:8000
 ## 6. Frontend Setup
 
 ```bash
-cd brose-platform
+cd MES_Frontend
 
 # Install dependencies
 npm install
@@ -137,22 +122,31 @@ npm run dev
 
 Frontend runs at: http://localhost:5173
 
-> Make sure the frontend `.env` file exists (created in Step 2). Without it, the app will still
-> work using the fallback URL, but it is good practice to have it in place.
-
 ---
 
 ## Summary Checklist
 
 - [ ] PostgreSQL and pgAdmin installed and running
 - [ ] `brose_db` database created via pgAdmin
-- [ ] `brose_backend/.env` file created (copied from `.env.example`)
-- [ ] `brose-platform/.env` file created (copied from `.env.example`)
-- [ ] `pip install -r requirements.txt` done
+- [ ] `MES_Backend/.env` file created (copied from `.env.example`)
+- [ ] `MES_Frontend/.env` file created (copied from `.env.example`)
+- [ ] `pip install -r requirements.txt` done inside `MES_Backend/`
 - [ ] `python manage.py migrate` done
 - [ ] `python manage.py setup_project` done
-- [ ] `npm install` done in `brose-platform/`
+- [ ] `npm install` done inside `MES_Frontend/`
 - [ ] Both servers running (port 8000 and 5173)
+- [ ] Default admin password changed via Settings → My Profile after first login
+
+---
+
+## Platform Usage Notes
+
+- **Downtime duration** is entered and stored in **seconds**
+- **Shift duration** is defined as a time range (e.g. `8:00 AM - 4:00 PM`) in Master Data → Shift Definition
+- After saving any transaction section, click **CALCULATE** to compute KPIs
+- KPI values (OEE, EA, PE, QR) are raw ratios (e.g. `0.85` = 85%)
+- NOK Type and NOK Reason Code are bidirectionally linked — selecting one auto-sets the other
+- Page-level access is controlled via Roles in Settings
 
 ---
 
@@ -175,11 +169,9 @@ DB_PORT=5432
 ### 2. Collect static files
 
 ```bash
-cd brose_backend
+cd MES_Backend
 python manage.py collectstatic --noinput
 ```
-
-This copies all static files into `brose_backend/staticfiles/`. Serve this folder via nginx.
 
 ### 3. Run backend with Gunicorn
 
@@ -192,21 +184,21 @@ Do **not** use `python manage.py runserver` in production.
 ### 4. Build and serve frontend
 
 ```bash
-cd brose-platform
+cd MES_Frontend
 
 # Set production API URL
-echo "VITE_API_BASE_URL=http://<your-server-ip>/api" > .env
+echo VITE_API_BASE_URL=http://<your-server-ip>/api > .env
 
 npm install
 npm run build
 ```
 
-Serve the resulting `brose-platform/dist/` folder via nginx or any static file host.
+Serve the resulting `MES_Frontend/dist/` folder via nginx or any static file host.
 
 ### Production Checklist
 
 - [ ] `DEBUG=False` in backend `.env`
-- [ ] `SECRET_KEY` is a strong random value (not the dev key)
+- [ ] `SECRET_KEY` is a strong random value
 - [ ] `ALLOWED_HOSTS` set to real server IP/domain
 - [ ] `CORS_ALLOWED_ORIGINS` set to real frontend URL
 - [ ] `python manage.py migrate` run on server DB

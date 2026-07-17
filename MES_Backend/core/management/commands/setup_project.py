@@ -187,4 +187,4 @@ class Command(BaseCommand):
         )
 
         self.stdout.write(self.style.SUCCESS('Setup complete.'))
-        self.stdout.write(self.style.SUCCESS('Login: BR-00000001 / Admin@123'))
+        self.stdout.write(self.style.SUCCESS('Default login: BR-00000001 — see SETUP.md for password.'))

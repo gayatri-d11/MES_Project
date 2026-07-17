@@ -125,12 +125,16 @@ const [plants, setPlants] = useState([]);
     { title: 'Total Downtime', value: fmtDuration(data.kpis.totalDowntime), suffix: '', color: colors.warning, tooltip: fmtDurationText(data.kpis.totalDowntime) },
   ] : [];
 
+  const fmt2 = (v) => v != null ? parseFloat(v).toFixed(2) : '—';
+
   const oeeKpis = data?.oeeKpis ? [
-    { title: 'OEE', value: data.oeeKpis.oee ?? '—', suffix: data.oeeKpis.oee != null ? '%' : '', color: colors.primary, tooltip: 'Overall Equipment Effectiveness = (OK × Cycle Time) / TB' },
-    { title: 'Availability (EA)', value: data.oeeKpis.availability ?? '—', suffix: data.oeeKpis.availability != null ? '%' : '', color: colors.success, tooltip: 'Availability = TN / TB' },
-    { title: 'Performance (PE)', value: data.oeeKpis.performance ?? '—', suffix: data.oeeKpis.performance != null ? '%' : '', color: colors.secondaryText, tooltip: 'Performance = (Cycle Time × PPcs) / TN' },
-    { title: 'Quality (QR)', value: data.oeeKpis.quality ?? '—', suffix: data.oeeKpis.quality != null ? '%' : '', color: colors.warning, tooltip: 'Quality = OK / PPcs' },
+    { title: 'OEE', value: fmt2(data.oeeKpis.oee), suffix: '', color: colors.primary, tooltip: 'Overall Equipment Effectiveness = (OK × Cycle Time) / TB' },
+    { title: 'Availability (EA)', value: fmt2(data.oeeKpis.availability), suffix: '', color: colors.success, tooltip: 'Availability = TN / TB' },
+    { title: 'Performance (PE)', value: fmt2(data.oeeKpis.performance), suffix: '', color: colors.secondaryText, tooltip: 'Performance = (Cycle Time × PPcs) / TN' },
+    { title: 'Quality (QR)', value: fmt2(data.oeeKpis.quality), suffix: '', color: colors.warning, tooltip: 'Quality = OK / PPcs' },
   ] : null;
+
+  const wsKpiRows = data?.wsKpiRows || [];
 
   const hasData = data && data.kpis.totalProduction > 0;
 
@@ -163,14 +167,6 @@ const [plants, setPlants] = useState([]);
             <Select allowClear placeholder="All WSs" style={{ width: '100%' }} value={selectedWS}
               onChange={v => { setSelectedWS(v); setSelectedModule(null); }} disabled={!selectedWC}>
               {filteredWSs.map(w => <Option key={w.id} value={w.resource_name}>{w.resource_name}</Option>)}
-            </Select>
-          </div>
-
-          <div style={styles.filterItem}>
-            <span style={styles.filterLabel}>Module</span>
-            <Select allowClear placeholder="All Modules" style={{ width: '100%' }} value={selectedModule}
-              onChange={setSelectedModule} disabled={!selectedWS}>
-              {filteredModules.map(m => <Option key={m.id} value={m.equipment}>{m.equipment}</Option>)}
             </Select>
           </div>
 
@@ -313,15 +309,46 @@ const [plants, setPlants] = useState([]);
             {
               key: 'analysis',
               label: 'Production Analysis',
-              children: !data || !hasData ? (
-                <Card style={styles.chartCard}>
-                  <Empty description="No production data found for the selected filters." />
-                </Card>
-              ) : (
-                <>
-                    {/* OEE KPI Cards */}
-                    {oeeKpis && (
-                      <Row gutter={[12, 12]} style={{ marginTop: constants.spacing.lg }}>
+              children: (() => {
+                const hasOee = data && (data.oeeKpis?.oee != null || wsKpiRows.length > 0);
+                if (!data || (!hasData && !hasOee)) return (
+                  <Card style={styles.chartCard}>
+                    <Empty description="No production or OEE data found for the selected filters." />
+                  </Card>
+                );
+                return (
+                  <>
+                    {/* OEE KPI Cards — per-WS rows as cards when WS selected, else WC-level */}
+                    {wsKpiRows.length > 0 ? (
+                      wsKpiRows.map((ws, wi) => (
+                        <div key={wi}>
+                          <span style={{ ...styles.chartTitle, marginTop: wi > 0 ? constants.spacing.lg : 0, display: 'block' }}>
+                            {ws.workstation} — {ws.shift} — {ws.date}
+                          </span>
+                          <Row gutter={[12, 12]}>
+                            {[
+                              { title: 'OEE', value: fmt2(ws.oee), color: colors.primary, tooltip: 'OEE = (OK × TCT) / TB' },
+                              { title: 'Availability (EA)', value: fmt2(ws.availability), color: colors.success, tooltip: 'EA = TN / TB' },
+                              { title: 'Performance (PE)', value: fmt2(ws.performance), color: colors.secondaryText, tooltip: 'PE = (TCT × PPcs) / TN' },
+                              { title: 'Quality (QR)', value: fmt2(ws.quality), color: colors.warning, tooltip: 'QR = OK / PPcs' },
+                            ].map((kpi, i) => (
+                              <Col xs={12} sm={6} key={i}>
+                                <AntTooltip title={kpi.tooltip}>
+                                  <Card style={{ ...styles.kpiCard, cursor: 'default' }}>
+                                    <Statistic
+                                      title={<span style={{ fontSize: '12px', color: colors.textSecondary, fontFamily: constants.fontFamily }}>{kpi.title}</span>}
+                                      value={kpi.value}
+                                      valueStyle={{ color: kpi.color, fontSize: '20px', fontFamily: constants.fontFamily }}
+                                    />
+                                  </Card>
+                                </AntTooltip>
+                              </Col>
+                            ))}
+                          </Row>
+                        </div>
+                      ))
+                    ) : oeeKpis && (
+                      <Row gutter={[12, 12]}>
                         {oeeKpis.map((kpi, i) => (
                           <Col xs={24} sm={12} lg={6} key={i} style={{ flex: '1 1 0' }}>
                             <AntTooltip title={kpi.tooltip}>
@@ -340,7 +367,7 @@ const [plants, setPlants] = useState([]);
                     )}
 
                     {/* Production Trend */}
-                    {data.productionTrend.length > 0 ? (
+                    {hasData && (data.productionTrend.length > 0 ? (
                       <Row gutter={[16, 16]} style={{ marginTop: constants.spacing.lg }}>
                         <Col xs={24}>
                           <Card style={styles.chartCard}>
@@ -359,9 +386,10 @@ const [plants, setPlants] = useState([]);
                           </Card>
                         </Col>
                       </Row>
-                    ) : <Empty description="No trend data available." style={{ marginTop: 40 }} />}
-                </>
-              ),
+                    ) : <Empty description="No trend data available." style={{ marginTop: 40 }} />)}
+                  </>
+                );
+              })(),
             },
           ]} />
 

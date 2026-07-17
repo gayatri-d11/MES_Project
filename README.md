@@ -32,15 +32,16 @@ and resource data — and provides supervisors with real-time visibility into pl
 
 ```
 /
-├── brose_backend/          # Django REST API
+├── MES_Backend/            # Django REST API
 │   ├── core/               # Models, views, serializers, URLs
+│   │   └── management/     # setup_project seed command
 │   ├── brose_backend/      # Django project settings
 │   ├── requirements.txt    # Python dependencies
 │   └── .env.example        # Environment variable template
 │
-├── brose-platform/         # React frontend
+├── MES_Frontend/           # React frontend
 │   ├── src/
-│   │   ├── page/           # Page components (Dashboard, MasterData, Transaction, etc.)
+│   │   ├── page/           # Page components (Home, MasterData, Transaction, Production, Settings)
 │   │   ├── layout/         # AppLayout, Header, Sidebar
 │   │   ├── context/        # AuthContext (JWT + auto logout)
 │   │   ├── routes/         # AppRoutes, ProtectedRoute
@@ -63,15 +64,15 @@ For full setup instructions, refer to **[SETUP.md](./SETUP.md)**.
 CREATE DATABASE brose_db;
 
 # 2. Backend
-cd brose_backend
-python -m venv venv
-venv\Scripts\activate
+cd MES_Backend
+copy .env.example .env   # then fill in your values
 pip install -r requirements.txt
 python manage.py migrate
 python manage.py setup_project
 
 # 3. Frontend
-cd brose-platform
+cd MES_Frontend
+copy .env.example .env
 npm install
 npm run dev
 ```
@@ -79,7 +80,7 @@ npm run dev
 Backend: `http://localhost:8000`
 Frontend: `http://localhost:5173`
 
-Default admin login — Employee No: `BR-00000001` / Password: set during `setup_project`
+Default admin login — Employee No: `BR-00000001` / Password: `Admin@123`
 
 ---
 
@@ -89,7 +90,8 @@ The `.env` file is not committed to the repository.
 Copy `.env.example` to `.env` and fill in your values:
 
 ```bash
-cp brose_backend/.env.example brose_backend/.env
+cd MES_Backend
+copy .env.example .env
 ```
 
 ---
@@ -100,6 +102,9 @@ cp brose_backend/.env.example brose_backend/.env
 - All API endpoints are prefixed with `/api/`
 - JWT access token lifetime is 8 hours; auto logout is handled on the frontend on token expiry
 - Page-level access is controlled via roles assigned to employees in Settings
+- Downtime duration is stored and displayed in **seconds** throughout the platform
+- After saving transaction data, click **CALCULATE** to compute and save KPIs
+- KPI values (OEE, EA, PE, QR) are raw ratios displayed to 2 decimal places (e.g. `0.85`)
 
 ---
 

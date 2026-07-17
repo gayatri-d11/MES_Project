@@ -734,10 +734,6 @@ def _calculate_and_save_kpis(labour, facility, work_center, shift, date_str):
     After all transaction rows are saved, compute and upsert KPIs at module,
     workstation, and work-center level.
     """
-    shift_secs = _shift_duration_seconds(shift)
-    if not shift_secs:
-        return  # cannot compute without shift duration
-
     day_date = timezone.datetime.strptime(date_str, '%Y-%m-%d').replace(tzinfo=timezone.utc)
     shift_name = shift.shift_name
 
@@ -748,17 +744,28 @@ def _calculate_and_save_kpis(labour, facility, work_center, shift, date_str):
         .select_related('resource', 'reason_code__reason_type')
     )
 
-    # Group downtime by resource (module-level workstation resource)
+    # Group downtime by module_name (equipment name stored at save time)
     from collections import defaultdict
-    dt_by_resource = defaultdict(list)
+    dt_by_module = defaultdict(list)
     for row in downtime_rows:
-        dt_by_resource[row.resource_id].append(row)
+        key = row.module_name or str(row.resource_id)
+        dt_by_module[key].append(row)
 
-    # Gather target cycle times by resource
-    tct_by_resource = {
-        t.resource_id: float(t.target_cycle_time)
-        for t in TblResourceLabourDetailModule.objects.filter(parent=labour).select_related('resource')
+    # Gather target cycle times by module_name
+    tct_by_module = {
+        (t.module_name or str(t.resource_id)): float(t.target_cycle_time)
+        for t in TblResourceLabourDetailModule.objects.filter(parent=labour)
     }
+
+    # Also keep resource_id lookup for workstation grouping
+    resource_by_module = {}
+    for t in TblResourceLabourDetailModule.objects.filter(parent=labour).select_related('resource'):
+        key = t.module_name or str(t.resource_id)
+        resource_by_module[key] = t.resource
+    for row in downtime_rows:
+        key = row.module_name or str(row.resource_id)
+        if key not in resource_by_module:
+            resource_by_module[key] = row.resource
 
     # Gather production totals — production is at work-center level, not per module
     # We aggregate OK/NOK across all production rows for this shift/date/wc
@@ -771,43 +778,43 @@ def _calculate_and_save_kpis(labour, facility, work_center, shift, date_str):
     total_nok = sum(p.nok_produced_quantity or 0 for p in prod_qs)
     total_ppcs = total_ok + total_nok
 
-    # Collect all resource IDs referenced (downtime + target cycle)
-    all_resource_ids = set(dt_by_resource.keys()) | set(tct_by_resource.keys())
+    # Collect all module keys referenced (downtime + target cycle)
+    all_module_keys = set(dt_by_module.keys()) | set(tct_by_module.keys())
 
     # --- Per-module KPI (TblKpiModule) ---
-    module_tn = {}  # resource_id -> TN in seconds
-    module_tb = {}  # resource_id -> TB in seconds
-    module_total_dt = {}  # resource_id -> total downtime seconds
+    module_tn = {}  # module_key -> TN in seconds
+    module_tb = {}  # module_key -> TB in seconds
+    module_total_dt = {}  # module_key -> total downtime seconds
 
-    TB_REASON_TYPE_ID = 1018  # 'TB: Utilization Time'
-    OEE_REDUCE_TYPES = {'TO: Organizational Downtime', 'TT: Technical Downtime', 'TW: Maintenance Cause Downtime'}
+    TB_REASON_TYPES = {'TO: Organizational Downtime', 'TN: Utilization Time (Running)', 'TT: Technical Downtime', 'TW: Maintenance Cause Downtime'}
+    OEE_EXEMPT_TYPES = {'TB: Utilization Time', 'TN: Utilization Time (Running)'}
 
-    for res_id in all_resource_ids:
-        rows = dt_by_resource.get(res_id, [])
+    for mod_key in all_module_keys:
+        rows = dt_by_module.get(mod_key, [])
         total_dt = float(sum(r.duration for r in rows))
-        module_total_dt[res_id] = total_dt
+        module_total_dt[mod_key] = total_dt
 
-        # Check for explicit TB row
-        tb_rows = [r for r in rows if r.reason_code.reason_type_id == TB_REASON_TYPE_ID]
-        if tb_rows:
-            tb = float(sum(r.duration for r in tb_rows))
-        else:
-            tb = float(shift_secs)
-        module_tb[res_id] = tb
+        # TB = TO + TN + TT + TW
+        tb_rows = [r for r in rows if r.reason_code.reason_type and r.reason_code.reason_type.reason_type in TB_REASON_TYPES]
+        if not tb_rows:
+            module_tb[mod_key] = None
+            module_tn[mod_key] = None
+            continue
+        tb = float(sum(r.duration for r in tb_rows))
+        module_tb[mod_key] = tb
 
-        # TN = TB - sum(TO/TT/TW)
-        reduce_secs = float(sum(
-            r.duration for r in rows
-            if r.reason_code.reason_type and r.reason_code.reason_type.reason_type in OEE_REDUCE_TYPES
-        ))
-        tn = max(0.0, tb - reduce_secs)
-        module_tn[res_id] = tn
+        # TN = TN rows only
+        tn_rows = [r for r in rows if r.reason_code.reason_type and r.reason_code.reason_type.reason_type == 'TN: Utilization Time (Running)']
+        tn = float(sum(r.duration for r in tn_rows))
+        module_tn[mod_key] = tn
 
         # Upsert TblKpiModule
         try:
-            resource = TblResource.objects.get(id=res_id)
+            resource = resource_by_module.get(mod_key)
+            if not resource:
+                continue
             existing = TblKpiModule.objects.filter(
-                resource_id=res_id,
+                resource_id=resource.id,
                 facility=facility,
                 work_center=work_center,
                 shift=shift_name,
@@ -822,7 +829,7 @@ def _calculate_and_save_kpis(labour, facility, work_center, shift, date_str):
                 TblKpiModule.objects.create(
                     id=new_id,
                     resource=resource,
-                    module_name=TblEquipment.objects.filter(resource=resource).values_list('equipment', flat=True).first() or '',
+                    module_name=mod_key,
                     facility=facility,
                     work_center=work_center,
                     day_date=day_date,
@@ -830,46 +837,37 @@ def _calculate_and_save_kpis(labour, facility, work_center, shift, date_str):
                     running_duration=tn,
                     total_downtime=str(round(total_dt, 2)),
                 )
-        except TblResource.DoesNotExist:
+        except Exception:
             pass
 
     # --- Per-workstation KPI (TblKpiWorkStation) ---
-    # A workstation (TblResource with resource_type=workstation) owns modules (TblEquipment).
-    # Group module resources by their parent workstation resource.
-    ws_modules = defaultdict(list)  # workstation_resource_id -> [module_resource_id, ...]
-    for res_id in all_resource_ids:
-        try:
-            resource = TblResource.objects.get(id=res_id)
-            ws_modules[resource.id].append(res_id)
-        except TblResource.DoesNotExist:
-            pass
+    # Group module keys by their parent workstation resource
+    ws_resource_map = {}  # workstation resource_id -> TblResource
+    ws_modules = defaultdict(list)  # workstation resource_id -> [module_keys]
+    for mod_key, res in resource_by_module.items():
+        ws_resource_map[res.id] = res
+        ws_modules[res.id].append(mod_key)
 
-    # Also include workstations that appear in resource planning
-    ws_resources = set()
-    for res_id in all_resource_ids:
-        try:
-            ws_resources.add(TblResource.objects.get(id=res_id))
-        except TblResource.DoesNotExist:
-            pass
+    for ws_id, ws_resource in ws_resource_map.items():
+        mod_keys = ws_modules.get(ws_id, [])
 
-    for ws_resource in ws_resources:
-        ws_id = ws_resource.id
-        mod_ids = ws_modules.get(ws_id, [ws_id])
+        total_dt_ws = float(sum(module_total_dt.get(m, 0) for m in mod_keys))
 
-        tb_ws = float(sum(module_tb.get(m, shift_secs) for m in mod_ids)) / len(mod_ids)
-        tn_ws = float(sum(module_tn.get(m, shift_secs) for m in mod_ids)) / len(mod_ids)
-        total_dt_ws = float(sum(module_total_dt.get(m, 0) for m in mod_ids))
+        tct_vals = [tct_by_module[m] for m in mod_keys if m in tct_by_module]
+        if tct_vals:
+            fastest_key = min((m for m in mod_keys if m in tct_by_module), key=lambda m: tct_by_module[m])
+            tct_ws = tct_by_module[fastest_key]
+            tb_ws = module_tb.get(fastest_key)
+            tn_ws = module_tn.get(fastest_key)
+        else:
+            tct_ws = tb_ws = tn_ws = None
 
-        # Use average target cycle time across modules for this workstation
-        tct_vals = [tct_by_resource[m] for m in mod_ids if m in tct_by_resource]
-        tct_ws = (sum(tct_vals) / len(tct_vals)) if tct_vals else 0.0
-
-        ppcs = total_ppcs  # production is at WC level; distribute evenly if needed
+        ppcs = total_ppcs
         ok = total_ok
 
-        oee = (ok * tct_ws / tb_ws) if tb_ws > 0 and tct_ws > 0 else None
-        ea = (tn_ws / tb_ws) if tb_ws > 0 else None
-        pe = (tct_ws * ppcs / tn_ws) if tn_ws > 0 and tct_ws > 0 else None
+        oee = (ok * tct_ws / tb_ws) if tb_ws and tct_ws else None
+        ea = (tn_ws / tb_ws) if tb_ws and tn_ws is not None else None
+        pe = (tct_ws * ppcs / tn_ws) if tn_ws and tct_ws else None
         qr = (ok / ppcs) if ppcs > 0 else None
 
         existing_ws = TblKpiWorkStation.objects.filter(
@@ -883,7 +881,7 @@ def _calculate_and_save_kpis(labour, facility, work_center, shift, date_str):
             station=ws_resource.resource_name,
             oee=oee, availability=ea, performance=pe, quality=qr,
             tb_val=tb_ws, tn_val=tn_ws,
-            total_downtime=total_dt_ws, running_duration=tn_ws,
+            total_downtime=total_dt_ws, running_duration=tn_ws if tn_ws is not None else 0,
         )
         if existing_ws:
             for k, v in kpi_ws_data.items():
@@ -902,26 +900,38 @@ def _calculate_and_save_kpis(labour, facility, work_center, shift, date_str):
             )
 
     # --- Per-work-center KPI (TblKpiWorkCenter) ---
-    if not all_resource_ids:
+    if not all_module_keys:
         return
 
-    tb_wc = float(shift_secs)
-    tn_wc = float(shift_secs) - float(sum(
-        r.duration for r in downtime_rows
-        if r.reason_code.reason_type and r.reason_code.reason_type.reason_type in OEE_REDUCE_TYPES
-    ))
-    tn_wc = max(0.0, tn_wc)
-    total_dt_wc = float(sum(r.duration for r in downtime_rows))
+    ws_kpi_candidates = []
+    for ws_id, ws_resource in ws_resource_map.items():
+        mod_keys_wc = ws_modules.get(ws_id, [])
+        tct_vals_wc = [tct_by_module[m] for m in mod_keys_wc if m in tct_by_module]
+        if tct_vals_wc:
+            fastest_key_wc = min((m for m in mod_keys_wc if m in tct_by_module), key=lambda m: tct_by_module[m])
+            tb_candidate = module_tb.get(fastest_key_wc)
+            tn_candidate = module_tn.get(fastest_key_wc)
+            if tb_candidate is not None:
+                ws_kpi_candidates.append((
+                    tct_by_module[fastest_key_wc],
+                    tb_candidate,
+                    tn_candidate,
+                ))
 
-    tct_all = list(tct_by_resource.values())
-    tct_wc = (sum(tct_all) / len(tct_all)) if tct_all else 0.0
+    if ws_kpi_candidates:
+        tct_wc, tb_wc, tn_wc = min(ws_kpi_candidates, key=lambda x: x[0])
+        tn_wc = max(0.0, tn_wc) if tn_wc is not None else None
+    else:
+        tct_wc = tb_wc = tn_wc = None
+
+    total_dt_wc = float(sum(r.duration for r in downtime_rows))
 
     ppcs_wc = total_ppcs
     ok_wc = total_ok
 
-    oee_wc = (ok_wc * tct_wc / tb_wc) if tb_wc > 0 and tct_wc > 0 else None
-    ea_wc = (tn_wc / tb_wc) if tb_wc > 0 else None
-    pe_wc = (tct_wc * ppcs_wc / tn_wc) if tn_wc > 0 and tct_wc > 0 else None
+    oee_wc = (ok_wc * tct_wc / tb_wc) if tb_wc and tct_wc else None
+    ea_wc = (tn_wc / tb_wc) if tb_wc and tn_wc is not None else None
+    pe_wc = (tct_wc * ppcs_wc / tn_wc) if tn_wc and tct_wc else None
     qr_wc = (ok_wc / ppcs_wc) if ppcs_wc > 0 else None
 
     existing_wc = TblKpiWorkCenter.objects.filter(
@@ -1054,20 +1064,8 @@ class TransactionView(APIView):
         except TblShiftDefinition.DoesNotExist:
             return Response({'error': 'Shift not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        try:
-            planning = TblShiftPlanning.objects.filter(shift=shift, work_center__work_center=work_center).order_by('-is_active').first()
-        except Exception:
-            planning = None
-
-        if not planning:
-            return Response({'exists': False})
-
-        labour = TblResourceLabour.objects.filter(
-            facility__facility=facility,
-            work_center__work_center=work_center,
-            scheduled_shift=planning,
-            transaction_date__date=date,
-        ).first()
+        labour_id = f"{facility}-{work_center}-{shift_name}-{date}"
+        labour = TblResourceLabour.objects.filter(id=labour_id).first()
 
         if not labour:
             return Response({'exists': False})
@@ -1075,7 +1073,7 @@ class TransactionView(APIView):
         downtime = [
             {
                 'id': d.id,
-                'module': TblEquipment.objects.filter(resource=d.resource).values_list('equipment', flat=True).first() or '',
+                'module': d.module_name or TblEquipment.objects.filter(resource=d.resource).values_list('equipment', flat=True).first() or '',
                 'reasonCode': d.reason_code.reason_code if d.reason_code_id else '',
                 'duration': float(d.duration) if d.duration is not None else 0,
             }
@@ -1084,7 +1082,7 @@ class TransactionView(APIView):
         target_cycle = [
             {
                 'id': t.id,
-                'module': TblEquipment.objects.filter(resource=t.resource).values_list('equipment', flat=True).first() or '',
+                'module': t.module_name or TblEquipment.objects.filter(resource=t.resource).values_list('equipment', flat=True).first() or '',
                 'targetCycle': float(t.target_cycle_time) if t.target_cycle_time is not None else 0,
             }
             for t in TblResourceLabourDetailModule.objects.filter(parent=labour).select_related('resource')
@@ -1101,7 +1099,7 @@ class TransactionView(APIView):
 
         production_qs = TblProduction.objects.filter(
             facility__facility=facility, work_center__work_center=work_center,
-            scheduled_shift=planning, transaction_date__date=date,
+            scheduled_shift=labour.scheduled_shift, transaction_date__date=date,
         )
         production = []
         for p in production_qs:
@@ -1117,7 +1115,7 @@ class TransactionView(APIView):
 
         parent = TblParent.objects.filter(
             facility__facility=facility, work_center__work_center=work_center,
-            scheduled_shift=planning, transaction_date__date=date,
+            scheduled_shift=labour.scheduled_shift, transaction_date__date=date,
         ).first()
         complaints = []
         if parent:
@@ -1208,12 +1206,12 @@ class TransactionView(APIView):
         TblResourceLabourDetailModuleDowntime.objects.filter(parent=labour).delete()
         for row in data.get('downtime', []):
             try:
-                resource = TblEquipment.objects.get(equipment=row.get('module'), is_active=True).resource
+                equip = TblEquipment.objects.get(equipment=row.get('module'), is_active=True)
                 reason_code = TblReasonCode.objects.get(reason_code=row.get('reasonCode'))
                 TblResourceLabourDetailModuleDowntime.objects.create(
                     id=self._next_id(TblResourceLabourDetailModuleDowntime),
-                    parent=labour, resource=resource, reason_code=reason_code,
-                    duration=float(row.get('duration') or 0),
+                    parent=labour, resource=equip.resource, module_name=equip.equipment,
+                    reason_code=reason_code, duration=float(row.get('duration') or 0),
                 )
             except (TblEquipment.DoesNotExist, TblReasonCode.DoesNotExist, ValueError):
                 pass
@@ -1222,10 +1220,10 @@ class TransactionView(APIView):
         TblResourceLabourDetailModule.objects.filter(parent=labour).delete()
         for row in data.get('targetCycle', []):
             try:
-                resource = TblEquipment.objects.get(equipment=row.get('module'), is_active=True).resource
+                equip = TblEquipment.objects.get(equipment=row.get('module'), is_active=True)
                 TblResourceLabourDetailModule.objects.create(
                     id=self._next_id(TblResourceLabourDetailModule),
-                    parent=labour, resource=resource,
+                    parent=labour, resource=equip.resource, module_name=equip.equipment,
                     target_cycle_time=float(row.get('targetCycle') or 0),
                 )
             except (TblEquipment.DoesNotExist, ValueError):
@@ -1303,9 +1301,6 @@ class TransactionView(APIView):
                 except TblProduct.DoesNotExist:
                     pass
 
-        # Calculate and persist KPIs
-        _calculate_and_save_kpis(labour, facility, work_center, shift, date_str)
-
         return Response({'message': 'Transaction saved successfully.'}, status=status.HTTP_201_CREATED)
 
 
@@ -1363,12 +1358,12 @@ class TransactionSectionView(APIView):
             TblResourceLabourDetailModuleDowntime.objects.filter(parent=labour).delete()
             for row in rows:
                 try:
-                    resource = TblEquipment.objects.get(equipment=row.get('module'), is_active=True).resource
+                    equip = TblEquipment.objects.get(equipment=row.get('module'), is_active=True)
                     reason_code = TblReasonCode.objects.get(reason_code=row.get('reasonCode'))
                     TblResourceLabourDetailModuleDowntime.objects.create(
                         id=self._next_id(TblResourceLabourDetailModuleDowntime),
-                        parent=labour, resource=resource, reason_code=reason_code,
-                        duration=float(row.get('duration') or 0),
+                        parent=labour, resource=equip.resource, module_name=equip.equipment,
+                        reason_code=reason_code, duration=float(row.get('duration') or 0),
                     )
                 except (TblEquipment.DoesNotExist, TblReasonCode.DoesNotExist, ValueError):
                     pass
@@ -1377,10 +1372,10 @@ class TransactionSectionView(APIView):
             TblResourceLabourDetailModule.objects.filter(parent=labour).delete()
             for row in rows:
                 try:
-                    resource = TblEquipment.objects.get(equipment=row.get('module'), is_active=True).resource
+                    equip = TblEquipment.objects.get(equipment=row.get('module'), is_active=True)
                     TblResourceLabourDetailModule.objects.create(
                         id=self._next_id(TblResourceLabourDetailModule),
-                        parent=labour, resource=resource,
+                        parent=labour, resource=equip.resource, module_name=equip.equipment,
                         target_cycle_time=float(row.get('targetCycle') or 0),
                     )
                 except (TblEquipment.DoesNotExist, ValueError):
@@ -1517,14 +1512,14 @@ class TransactionCalculateView(APIView):
             day_date__date=date_str,
         ).first()
 
-        def _pct(val):
-            return round(float(val) * 100, 1) if val is not None else None
+        def _fmt(val):
+            return round(float(val), 4) if val is not None else None
 
         result = {
-            'oee': _pct(kpi_wc.oee) if kpi_wc else None,
-            'availability': _pct(kpi_wc.availability) if kpi_wc else None,
-            'performance': _pct(kpi_wc.performance) if kpi_wc else None,
-            'quality': _pct(kpi_wc.quality) if kpi_wc else None,
+            'oee': _fmt(kpi_wc.oee) if kpi_wc else None,
+            'availability': _fmt(kpi_wc.availability) if kpi_wc else None,
+            'performance': _fmt(kpi_wc.performance) if kpi_wc else None,
+            'quality': _fmt(kpi_wc.quality) if kpi_wc else None,
             'ok_parts': kpi_wc.ok_parts if kpi_wc else None,
             'nok_parts': kpi_wc.nok_parts if kpi_wc else None,
             'tb_val': round(float(kpi_wc.tb_val), 1) if kpi_wc and kpi_wc.tb_val is not None else None,
@@ -1675,6 +1670,7 @@ class ProductionDashboardView(APIView):
 
         # OEE KPIs from TblKpiWorkCenter / TblKpiWorkStation
         oee_kpis = {'oee': None, 'availability': None, 'performance': None, 'quality': None}
+        ws_kpi_rows = []
         if work_center:
             kpi_wc_qs = TblKpiWorkCenter.objects.filter(work_center__work_center=work_center)
             if facility:
@@ -1689,13 +1685,37 @@ class ProductionDashboardView(APIView):
             if rows_wc:
                 def _avg(field):
                     vals = [float(getattr(r, field)) for r in rows_wc if getattr(r, field) is not None]
-                    return round(sum(vals) / len(vals) * 100, 1) if vals else None
+                    return round(sum(vals) / len(vals), 4) if vals else None
                 oee_kpis = {
                     'oee': _avg('oee'),
                     'availability': _avg('availability'),
                     'performance': _avg('performance'),
                     'quality': _avg('quality'),
                 }
+            # Always return per-workstation KPIs when a WC is selected
+            kpi_ws_qs = TblKpiWorkStation.objects.filter(resource__work_center__work_center=work_center)
+            if facility:
+                kpi_ws_qs = kpi_ws_qs.filter(facility__facility=facility)
+            if shift_name:
+                kpi_ws_qs = kpi_ws_qs.filter(shift=shift_name)
+            if date_from:
+                kpi_ws_qs = kpi_ws_qs.filter(day_date__date__gte=date_from)
+            if date_to:
+                kpi_ws_qs = kpi_ws_qs.filter(day_date__date__lte=date_to)
+            if workstation:
+                kpi_ws_qs = kpi_ws_qs.filter(resource__resource_name=workstation)
+            for r in kpi_ws_qs:
+                ws_kpi_rows.append({
+                    'workstation': r.resource.resource_name,
+                    'oee': round(float(r.oee), 4) if r.oee is not None else None,
+                    'availability': round(float(r.availability), 4) if r.availability is not None else None,
+                    'performance': round(float(r.performance), 4) if r.performance is not None else None,
+                    'quality': round(float(r.quality), 4) if r.quality is not None else None,
+                    'tb': round(float(r.tb_val), 1) if r.tb_val is not None else None,
+                    'tn': round(float(r.tn_val), 1) if r.tn_val is not None else None,
+                    'shift': r.shift,
+                    'date': str(r.day_date.date()) if r.day_date else None,
+                })
         elif workstation:
             kpi_ws_qs = TblKpiWorkStation.objects.filter(resource__resource_name=workstation)
             if facility:
@@ -1710,13 +1730,25 @@ class ProductionDashboardView(APIView):
             if rows_ws:
                 def _avg_ws(field):
                     vals = [float(getattr(r, field)) for r in rows_ws if getattr(r, field) is not None]
-                    return round(sum(vals) / len(vals) * 100, 1) if vals else None
+                    return round(sum(vals) / len(vals), 4) if vals else None
                 oee_kpis = {
                     'oee': _avg_ws('oee'),
                     'availability': _avg_ws('availability'),
                     'performance': _avg_ws('performance'),
                     'quality': _avg_ws('quality'),
                 }
+            for r in kpi_ws_qs:
+                ws_kpi_rows.append({
+                    'workstation': r.resource.resource_name,
+                    'oee': round(float(r.oee), 4) if r.oee is not None else None,
+                    'availability': round(float(r.availability), 4) if r.availability is not None else None,
+                    'performance': round(float(r.performance), 4) if r.performance is not None else None,
+                    'quality': round(float(r.quality), 4) if r.quality is not None else None,
+                    'tb': round(float(r.tb_val), 1) if r.tb_val is not None else None,
+                    'tn': round(float(r.tn_val), 1) if r.tn_val is not None else None,
+                    'shift': r.shift,
+                    'date': str(r.day_date.date()) if r.day_date else None,
+                })
 
         return Response({
             'kpis': {
@@ -1727,6 +1759,7 @@ class ProductionDashboardView(APIView):
                 'totalDowntime': total_downtime,
             },
             'oeeKpis': oee_kpis,
+            'wsKpiRows': ws_kpi_rows,
             'productionByVariant': production_by_variant,
             'downtimeByReason': downtime_by_reason,
             'productionTrend': production_trend,

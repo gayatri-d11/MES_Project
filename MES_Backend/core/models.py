@@ -393,6 +393,7 @@ class TblResourceLabourDetailModule(AuditBaseModel):
     id = models.IntegerField(primary_key=True)
     parent = models.ForeignKey(TblResourceLabour, on_delete=models.CASCADE, db_column='parent_id')
     resource = models.ForeignKey(TblResource, on_delete=models.RESTRICT, db_column='resource_id')
+    module_name = models.CharField(max_length=40, null=True, blank=True)
     target_cycle_time = models.DecimalField(max_digits=28, decimal_places=10, default=0)
 
     class Meta:
@@ -406,6 +407,7 @@ class TblResourceLabourDetailModuleDowntime(AuditBaseModel):
     id = models.IntegerField(primary_key=True)
     parent = models.ForeignKey(TblResourceLabour, on_delete=models.CASCADE, db_column='parent_id')
     resource = models.ForeignKey(TblResource, on_delete=models.RESTRICT, db_column='resource_id')
+    module_name = models.CharField(max_length=40, null=True, blank=True)
     reason_code = models.ForeignKey(TblReasonCode, on_delete=models.RESTRICT, db_column='reason_code')
     duration = models.DecimalField(max_digits=28, decimal_places=10)
 
